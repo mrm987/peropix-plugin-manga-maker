@@ -1,0 +1,665 @@
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const base = new URL('../api/', location.href);
+const hostBase = new URL('../../../', location.href);
+const busyStates = ['planning', 'generating', 'stopping'];
+const layoutNames = {'free':'자유 배치', 'single':'한 컷', 'two-rows':'위아래 두 컷', 'three-rows':'세 줄', 'four-grid':'2 × 2', 'four-rows':'네 줄', 'hero-top':'큰 컷 위', 'hero-bottom':'큰 컷 아래', 'six-grid':'2 × 3', 'two-cols':'좌우 두 컷', 'tall-left':'세로 컷 왼쪽', 'tall-right':'세로 컷 오른쪽'};
+const frameNames = {'rectangle':'사각 컷','slant-up':'오른쪽 위로 사선','slant-down':'오른쪽 아래로 사선','borderless':'테두리 없음','inset':'겹치는 작은 컷'};
+let config, doc = null, selected = 0, mode = 'board', dirty = false, saving = null, saveTimer, requesting = false;
+let referenceName='', referencePreviewUrl='';
+let savedStyles=[], stylesReady=false, modelRows=[], modelsBy={};
+let selectedStyle='', renamingStyle='';   // 목록에서 고른 화풍, 이름을 고치는 중인 화풍
+let activeOperation=null;
+const replanDirections=new Map();
+const regionOpen=new Set();   // 「영역」을 펼쳐 둔 컷 (프로젝트:페이지:컷)
+let viewPrefs={width:1200, fit:true, setupOpen:true, editorOpen:true, tab:'story'};
+try { viewPrefs={...viewPrefs,...JSON.parse(localStorage.getItem('manga-maker-view') || '{}')}; } catch {}
+const generationFields={model:'model',steps:'steps',cfg:'cfg',cfg_rescale:'cfgRescale',sampler:'sampler',seed:'seed'};
+const generationLabels={model:'모델',steps:'스텝',cfg:'CFG',cfg_rescale:'리스케일',sampler:'샘플러',seed:'시드'};
+const busy = () => requesting || (doc && busyStates.includes(doc.status));
+const optionIds = ['maxPanels','layoutMode','style','direction','dialogue','size','width','height','stylePrompt','negativePrompt','model','steps','cfg','cfgRescale','sampler','seed','workspace','account'];
+
+function saveView(){try{localStorage.setItem('manga-maker-view',JSON.stringify(viewPrefs));}catch{}}
+function updateWidthLabel(){
+  const actual=Math.round(document.querySelector('.stage').getBoundingClientRect().width);
+  $('previewWidthValue').textContent=viewPrefs.fit ? `화면 너비${actual ? ` · ${actual} px` : ''}` : `${viewPrefs.width} px${actual && actual<viewPrefs.width ? ` (표시 ${actual} px)` : ''}`;
+}
+function applyView(){
+  document.querySelector('.shell').classList.toggle('setup-collapsed',!viewPrefs.setupOpen);
+  $('setupBody').hidden=!viewPrefs.setupOpen;
+  $('toggleSetup').setAttribute('aria-expanded',viewPrefs.setupOpen);
+  $('toggleSetup').querySelector('span').textContent=viewPrefs.setupOpen?'설정 접기':'설정 펼치기';
+  $('editorPane').hidden=!viewPrefs.editorOpen;
+  $('toggleEditor').setAttribute('aria-expanded',viewPrefs.editorOpen);
+  $('toggleEditor').textContent=viewPrefs.editorOpen?'편집창 접기':'편집창 펼치기';
+  document.querySelector('.editing').classList.toggle('editor-collapsed',!viewPrefs.editorOpen);
+  viewPrefs.width=Math.max(320,Math.min(2000,Number(viewPrefs.width)||1200));
+  $('previewWidth').value=viewPrefs.width;
+  document.documentElement.style.setProperty('--preview-width',viewPrefs.fit?'100%':`${viewPrefs.width}px`);
+  $('fitPreview').setAttribute('aria-pressed',viewPrefs.fit);
+  updateWidthLabel();
+}
+function syncSize(){
+  const value=`${$('width').value},${$('height').value}`;
+  $('size').value=[...$('size').options].some(o=>o.value===value)?value:'custom';
+}
+function updateActivity(){
+  const working=!!busy(), p=doc?.progress || {}, local=activeOperation;
+  $('activityCard').classList.toggle('is-working',working);
+  $('activityCard').setAttribute('aria-busy',working);
+  $('activitySpinner').hidden=!working;
+  const labels={outline:'스토리 기획',storyboard:'컷 구성',generate:'이미지 생성',replan:'페이지 재기획',translate:'대사 번역'};
+  $('activityBadge').textContent=working ? (local?.label || labels[p.phase] || '작업 중') : ({error:'확인 필요',paused:'멈춤',ready:'기획 완료',complete:'생성 완료'}[doc?.status] || '준비');
+  $('status').textContent=local ? `${local.label} 중입니다.` : doc?.message || 'AI가 페이지와 컷을 구성하고, 인물의 위치까지 준비합니다.';
+  $('activityDetail').hidden=!working;
+  const total=!local && p.total, completed=p.completed || 0;
+  const g=doc?.generation, waiting=(doc?.gen_requests || []).length;
+  const side=doc?.status==='planning' && (g?.page!=null || waiting || doc.gen_follow) ? ` · ${g?.page!=null ? `${g.page+1}페이지 생성 중` : doc.gen_follow ? '기획되는 대로 생성' : '생성 대기'}${waiting ? ` (대기 ${waiting})` : ''}${doc.queue_state==='waiting'?' · NAI 큐 대기':''}` : '';
+  $('activityCount').textContent=(total ? `${completed} / ${total}페이지 완료${p.page!=null ? ` · 현재 ${p.page+1}페이지` : ''}${!side && doc.queue_state==='waiting'?' · NAI 큐 대기':''}` : '응답을 기다리고 있습니다')+side;
+  if(total){$('activityProgress').max=total;$('activityProgress').value=completed;}else{$('activityProgress').removeAttribute('value');}
+  const seconds=Math.max(0,Math.floor(Date.now()/1000-(local?.started_at || p.started_at || doc?.updated || Date.now()/1000)));
+  $('elapsed').textContent=`${Math.floor(seconds/60)}분 ${String(seconds%60).padStart(2,'0')}초 경과`;
+  $('referenceActivity').hidden=local?.target!=='styleImage';
+  $('styleRefDrop').classList.toggle('is-working',local?.target==='styleImage');
+  document.querySelectorAll('button.is-working').forEach(el=>el.classList.remove('is-working'));
+  if(local?.target && $(local.target)?.tagName==='BUTTON')$(local.target).classList.add('is-working');
+  document.querySelectorAll('[data-page]').forEach(el=>el.classList.toggle('is-working',working&&!local&&p.page===+el.dataset.page));
+  $('generationSummary').textContent=`CFG ${$('cfg').value} · ${$('steps').value}스텝`;
+  $('stop').disabled=requesting;
+}
+
+async function api(path, method = 'GET', body) {
+  const r = await fetch(new URL(path, base), {method, headers: {'Content-Type':'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+  const data = await r.json();
+  if (!r.ok || data.error) {
+    const detail = data.detail || data.error || `요청 실패 (${r.status})`;
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  return data;
+}
+function error(e) { $('alert').hidden = false; $('alert').textContent = e.message || String(e); }
+function clearError() { $('alert').hidden = true; }
+function renderLlm() {
+  const data = config.llm;
+  const group = engine => data.providers.filter(p=>p.engine===engine).map(p=>`<option value="${esc(p.id)}" ${p.available?'':'disabled'}>${esc(p.label)}${p.engine==='cli'&&!p.available ? (p.installed?' (미지원)':' (설치 안됨)') : ''}</option>`).join('');
+  $('llmProvider').innerHTML = '<option value="">앱 API 설정 따르기</option><optgroup label="CLI">'+group('cli')+'</optgroup><optgroup label="API">'+group('api')+'</optgroup>';
+  $('llmProvider').value = data.choice.provider;
+  const selectedProvider = data.providers.find(p=>p.id===data.choice.provider);
+  modelRows = modelsBy[data.choice.provider]?.models || [];
+  renderModels(data.choice.provider ? data.choice.model : data.model || '');
+  renderEffort(data.choice.effort);
+  // 값은 위의 세 선택칸에 이미 보인다 — 여기는 저장된 것과 준비 상태만 한 줄로 적는다.
+  const effort = data.choice.effort || (selectedProvider?.engine==='cli' ? 'CLI 기본' : '모델 기본값');
+  $('llm').textContent = `${selectedProvider?.label || data.provider} · ${data.model || 'CLI 기본 모델'} · ${effort}`
+    + (data.ready ? '' : ' · 설정 필요');
+  controls();
+  if (selectedProvider && selectedProvider.engine!=='cli' && !modelsBy[selectedProvider.id]) void loadModels(selectedProvider.id);
+}
+// Same dropdowns as the app's own LLM settings: the model list loads by itself and the effort
+// select shows only the levels that model reports (CLI: the fixed CLI levels, default high).
+function renderModels(value) {
+  const provider = config.llm.providers.find(p=>p.id===$('llmProvider').value);
+  const cli = provider?.engine==='cli';
+  const list = cli ? (provider.models || []).map(id=>({id})) : modelRows;
+  const loading = !!provider && !cli && !modelsBy[provider.id];
+  const options = [];
+  if (value && !list.some(m=>m.id===value)) options.push(`<option value="${esc(value)}">${esc(value)}</option>`);
+  if (cli || !value) options.push(`<option value="">${cli ? 'CLI 기본 모델' : loading ? '불러오는 중' : list.length ? '모델을 고르세요' : (modelsBy[provider?.id]?.err ? '목록을 못 받았습니다' : '모델 없음')}</option>`);
+  for (const m of list) options.push(`<option value="${esc(m.id)}">${esc(m.id)}${m.new ? '  ·  새 모델' : ''}${m.in ? `  ·  $${esc(m.in)}/M` : ''}${m.vision ? '  ·  vision' : ''}</option>`);
+  $('llmModel').innerHTML = options.join('');
+  $('llmModel').value = value || '';
+}
+function renderEffort(value) {
+  const provider = config.llm.providers.find(p=>p.id===$('llmProvider').value);
+  const cli = provider?.engine==='cli';
+  const picked = modelRows.find(m=>m.id===$('llmModel').value);
+  const levels = cli ? (provider.efforts || []) : (picked?.efforts || []);
+  $('llmEffort').hidden = !provider || !levels.length;
+  if (cli) {
+    $('llmEffort').innerHTML = levels.map(e=>`<option value="${esc(e)}">${esc(e)}</option>`).join('');
+    $('llmEffort').value = levels.includes(value) ? value : (levels.includes('high') ? 'high' : levels[0] || '');
+    return;
+  }
+  const options = [`<option value="">모델 기본값${picked?.effortDefault ? `  ·  ${esc(picked.effortDefault)}` : ''}</option>`];
+  for (const e of levels.filter(v=>v!=='none')) options.push(`<option value="${esc(e)}">${esc(e)}</option>`);
+  if (!picked?.reasoningLocked) options.push('<option value="none">끄기</option>');
+  $('llmEffort').innerHTML = options.join('');
+  $('llmEffort').value = [...$('llmEffort').options].some(o=>o.value===value) ? value : '';
+}
+async function loadModels(provider, force) {
+  if (!provider) return;
+  if (modelsBy[provider] && !force) { modelRows = modelsBy[provider].models; return; }
+  let entry;
+  // Not api(): the host returns models together with a non-fatal error text (a curated model
+  // missing upstream, a fixed list), and api() would throw that away with the whole list.
+  try {
+    const r = await fetch(new URL('llm/models?provider='+encodeURIComponent(provider), base));
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || data.error || `요청 실패 (${r.status})`);
+    entry = {models: data.models || [], err: data.error || ''};
+  } catch (e) { entry = {models: [], err: e.message || String(e)}; }
+  modelsBy[provider] = entry;
+  if ($('llmProvider').value !== provider) return;
+  modelRows = entry.models;
+  renderModels($('llmModel').value);
+  renderEffort($('llmEffort').value);
+  $('llm').textContent = entry.err ? `모델 목록: ${entry.err}` : `모델 ${entry.models.length}개를 불러왔습니다.`;
+  controls();
+}
+async function saveLlm() {
+  config.llm = await api('llm', 'PUT', {provider:$('llmProvider').value,model:$('llmModel').value.trim(),effort:$('llmEffort').value});
+  renderLlm();
+}
+function options() {
+  const width=+$('width').value, height=+$('height').value;
+  // pages 는 새 만화를 만들 때만 쓴다 — 기존 프로젝트의 값은 그대로 둔다 (이어서 그리기는 따로 보낸다).
+  return {pages: doc ? (doc.options?.pages ?? 0) : +$('pageCount').value, max_panels: +$('maxPanels').value, layout_mode:$('layoutMode').value, direction: $('direction').value,
+    dialogue: $('dialogue').value, style: $('style').value, style_prompt: $('stylePrompt').value,
+    // ★「화풍 선택」이 흑백·컬러·내 화풍을 한 칸에서 정한다 (사용자 지시 2026-09-15).
+    //   reference_style 은 1.1.1 까지의 이름이라 같은 뜻으로 함께 보낸다.
+    reference_style:$('style').value==='custom',reference_name:referenceName,negative_prompt:$('negativePrompt').value,
+    model: $('model').value, width, height, steps: +$('steps').value, cfg: +$('cfg').value,
+    cfg_rescale:+$('cfgRescale').value,sampler:$('sampler').value,
+    seed: +$('seed').value, workspace: $('workspace').value, account: $('account').value};
+}
+function putOptions(o) {
+  referenceName=o.reference_name || '';
+  $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '';
+  $('styleRefPreview').hidden=true;
+  const values = {maxPanels:o.max_panels, layoutMode:o.layout_mode || 'free', direction:o.direction, dialogue:o.dialogue,
+    style:o.reference_style ? 'custom' : (o.style || 'mono'), stylePrompt:o.style_prompt, model:o.model, width:o.width, height:o.height,
+    negativePrompt:o.negative_prompt ?? config.default_negative,
+    steps:o.steps, cfg:o.cfg, cfgRescale:o.cfg_rescale ?? 0, sampler:o.sampler || 'k_euler_ancestral', seed:o.seed, workspace:o.workspace, account:o.account};
+  for (const [id, value] of Object.entries(values)) if (value !== undefined) $(id).value = value;
+  syncSize();
+}
+function draft() { try { localStorage.setItem('manga-maker-draft', JSON.stringify({story:$('story').value, options:options()})); } catch {} }
+function markDirty() {
+  if (!doc?.outline || busy()) return;
+  dirty = true;
+  $('saved').textContent = '변경사항 저장 대기';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => persist().catch(error), 900);
+}
+async function persist() {
+  clearTimeout(saveTimer);
+  if (saving) await saving;
+  if (!dirty || !doc?.outline) return;
+  const current = doc, payload = {revision:doc.revision, options:options(), outline:doc.outline, pages:doc.pages.map(p => p.plan)};
+  dirty = false;
+  saving = api(`projects/${doc.id}`, 'PUT', payload).then(result => {
+    if (doc === current) {
+      doc.revision = result.revision;
+      doc.options = result.options;
+      doc.compiled = result.compiled;
+      $('saved').textContent = dirty ? '변경사항 저장 대기' : '저장됨';
+      renderPrompts();
+    }
+  }).catch(e => {dirty = true; $('saved').textContent = '저장 실패'; throw e;}).finally(() => {saving = null;});
+  await saving;
+  if (dirty) await persist();
+}
+async function listProjects() {
+  const result = await api('projects');
+  $('projects').innerHTML = '<option value="">새 만화</option>' + result.items.map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('');
+  $('projects').value = doc?.id || '';
+}
+function adopt(p) {
+  const switched = doc?.id !== p.id;
+  if(switched){$('importedOptions').hidden=true;$('story').value='';$('pageCount').value='0';}
+  if(doc?.id===p.id && (p.pages[selected]?.images.length || 0)>(doc.pages[selected]?.images.length || 0))mode='image';
+  doc = p; dirty = false; selected = Math.min(selected, Math.max(0, p.pages.length-1));
+  putOptions(p.options);
+  try { localStorage.setItem('manga-maker-current', p.id); } catch {}
+  render();
+}
+function controls() {
+  const b = !!busy();
+  for (const id of optionIds) $(id).disabled = b;
+  for (const id of ['llmProvider','llmRefresh']) $(id).disabled = b || !config;
+  $('llmModel').disabled = b || !$('llmProvider').value;
+  $('llmEffort').disabled = b || !$('llmProvider').value;
+  $('styleImage').disabled=b || !config;
+  $('stylePicker').disabled=b || !stylesReady;
+  $('refreshStyles').disabled=b || !config;
+  for(const el of $('styleList').querySelectorAll('button,input'))el.disabled=b;
+  $('saveStyle').disabled=b || !stylesReady || !$('stylePrompt').value.trim();
+  $('translateDialogue').disabled=b || !doc?.pages.length || $('dialogue').value==='none';
+  for (const id of ['story','pageCount','plan','automatic','example']) $(id).disabled = b || !config;
+  $('new').disabled = requesting;
+  $('projects').disabled = requesting;
+  $('stop').hidden = !b || requesting;
+  $('export').disabled = !doc || requesting;
+  $('save').disabled = b || !doc?.pages.length;
+  const done = doc?.outline && doc.pages.length === doc.outline.pages.length;
+  // While planning still runs, already storyboarded pages can be queued for generation.
+  const planning = !!doc?.accepting && doc.status==='planning' && !requesting;
+  const queued = doc?.gen_requests || [], generating = doc?.generation?.page;
+  $('generatePage').disabled = planning ? (!doc.pages[selected] || queued.includes(selected) || generating===selected) : (b || !doc?.pages.length || !done);
+  $('generateAll').disabled = planning ? !!doc.gen_follow : (b || !doc?.pages.length || !done || doc.pages.every(p => p.images.length));
+  $('generateAll').textContent = planning ? (doc.gen_follow ? '기획되는 대로 생성 중' : '기획되는 대로 생성') : `남은 ${doc?.pages.filter(p => !p.images.length).length || 0}페이지 생성`;
+  // 40페이지가 차면 더 이어서 그릴 수 없다 (서버 상한과 같은 값).
+  if (doc?.outline && doc.outline.pages.length >= 40) for (const id of ['plan','automatic']) $(id).disabled = true;
+  for (const input of document.querySelectorAll('.editor input,.editor textarea,.editor select,.editor button')) input.disabled = b;
+  if (doc?.pages.length) for (const button of document.querySelectorAll('[data-add-line]')) button.disabled ||= doc.pages[selected].plan.panels[+button.dataset.addLine].dialogue.length >= 3;
+  if ($('deletePage')) $('deletePage').disabled = b || !doc || doc.outline.pages.length <= 1;
+  updateActivity();
+}
+function render() {
+  $('projectTitle').textContent = doc?.outline?.title || (doc ? '새 이야기 기획 중' : '이야기를 들려주세요');
+  $('status').textContent = doc?.message || 'AI가 페이지와 컷을 구성하고, 인물의 위치까지 준비합니다.';
+  const queuedPages=doc?.gen_requests || [], generatingPage=doc?.generation?.page;
+  $('pageNav').innerHTML = (doc?.pages || []).map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${p.plan.panels.length}컷 · ${p.error ? '확인 필요' : generatingPage===i ? '생성 중' : queuedPages.includes(i) ? '생성 대기' : p.images.length ? `생성 ${p.images.length}장` : '기획 완료'}</small></span></button>`).join('');
+  const has = !!doc?.pages.length;
+  $('empty').hidden = has; $('content').hidden = !has;
+  if (has) { renderEditor(); renderBible(); renderBoard(); renderResult(); renderPrompts(); }
+  setMode(mode);
+  controls();
+}
+function setMode(value) {
+  mode = value; $('boardMode').setAttribute('aria-pressed', mode === 'board'); $('imageMode').setAttribute('aria-pressed', mode === 'image');
+  $('board').hidden = mode !== 'board'; $('result').hidden = mode !== 'image';
+  document.querySelector('.editing').classList.toggle('image-view',mode==='image');
+  applyView();
+  $('stageHint').textContent = mode === 'board' ? '점을 끌어 인물의 위치를 조정하세요. 숫자는 읽는 순서입니다.' : '이전 생성도 모두 보관됩니다. 이미지를 누르면 원본을 엽니다.';
+}
+const textarea = (attrs, value, rows=3) => `<textarea ${attrs} rows="${rows}">${esc(value)}</textarea>`;
+function renderEditor() {
+  const pg = doc.pages[selected], p = pg.plan;
+  const choices = [['free',null],...Object.entries(config.layouts).filter(([,boxes]) => boxes.length === p.panels.length)];
+  const free = p.layout === 'free';
+  const trash = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/></svg>';
+  $('pageEditor').innerHTML =
+    `<div class="ed-row"><label class="ed-label">페이지</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${layoutNames[name]}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="이 페이지 삭제" aria-label="이 페이지 삭제">${trash}</button></div>`
+    + `<div class="ed-row"><label class="ed-label">재기획</label><input id="replanInstructions" maxlength="4000" placeholder="이 페이지를 어떻게 고칠지 (비우면 현재 설정으로)" value="${esc(replanDirections.get(`${doc.id}:${selected}`) || '')}"><button id="replanPage">다시 기획</button></div>`
+    + `<div class="ed-row"><label class="ed-label">장면 태그</label><input data-page-field="setting" value="${esc(p.setting || '')}" placeholder="장소, 시간, 조명 태그"></div>`
+    + (pg.error ? `<p class="page-error">${esc(pg.error)}</p>` : '')
+    + p.panels.map((panel,i) => {
+      const r = panel.region, open = regionOpen.has(`${doc.id}:${selected}:${i}`);
+      const head = free && r
+        ? `<span class="cut-frame">${frameNames[r.frame]}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${open}">영역</button>`
+        : '<span class="cut-box"></span>';
+      return `<article class="panel-card" data-panel="${i}"><div class="cut-head"><span class="chip">${i+1}번 컷</span>${head}</div>`
+        + (free && r && open ? regionEditor(r) : '')
+        + `<div class="ed-row"><label class="ed-label">장면 요약</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
+        + `<div class="ed-row"><label class="ed-label">컷 태그</label>${textarea('data-panel-field="scene" placeholder="이 컷에만 있는 장면 태그"',panel.scene || '',2)}</div>`
+        + panel.subjects.map((s,j) => `<div class="subject" data-subject="${j}">`
+            + `<div class="cast-line"><span class="chip">${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</span></div>`
+            + `<div class="ed-row"><label class="ed-label">카메라</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
+            + `<div class="ed-row"><label class="ed-label">동작·표정</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
+            + `<div class="ed-row"><label class="ed-label">컷 안 위치</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">가로 · 세로</span></div></div>`).join('')
+        + (options().dialogue !== 'none'
+            ? `<div class="cast-line"><span class="ed-note">대사</span></div>`
+              + panel.dialogue.map((d,j) => `<div class="dialogue-row" data-line="${j}"><select data-line-field="speaker" aria-label="화자"><option value="">내레이션</option>${panel.subjects.map(s=>`<option value="${esc(s.character)}" ${d.speaker===s.character?'selected':''}>${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</option>`).join('')}</select>${textarea('data-line-field="text" aria-label="대사"',d.text,2)}<button data-remove-line="${j}" class="icon-btn" aria-label="대사 삭제"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div>`).join('')
+              + `<button class="subtle" data-add-line="${i}" ${panel.dialogue.length>=3?'disabled':''}>대사 추가</button>`
+            : '')
+        + '</article>';
+    }).join('');
+}
+function regionEditor(r) {
+  const cell = (key,label) => `<label>${label}<input data-region-field="${key}" type="number" min="${key==='w'||key==='h' ? '.05':'0'}" max="1" step=".01" value="${r[key]}"></label>`;
+  return `<div class="region-grid">${cell('x','페이지 가로')}${cell('y','페이지 세로')}${cell('w','너비')}${cell('h','높이')}</div>`
+    + `<div class="ed-row"><label class="ed-label">컷 테두리</label><select data-region-field="frame">${Object.entries(frameNames).map(([key,label])=>`<option value="${key}" ${r.frame===key?'selected':''}>${label}</option>`).join('')}</select></div>`;
+}
+function renderBible() {
+  $('characters').innerHTML = doc.outline.characters.map((c,i)=>`<div class="bible-char" data-character="${i}"><strong>${esc(c.name)}</strong><label>모든 컷에 공유할 외형·의상${textarea('data-char-field="prompt"',c.prompt,4)}</label><label>캐릭터 네거티브${textarea('data-char-field="uc"',c.uc,2)}</label></div>`).join('');
+}
+function boxes() {
+  const pg=doc.pages[selected].plan;
+  if (pg.layout==='free') return pg.panels.map(p=>[p.region.x,p.region.y,p.region.w,p.region.h]);
+  return [...config.layouts[pg.layout]].sort((a,b)=>a[1]-b[1] || (options().direction==='rtl' ? b[0]-a[0] : a[0]-b[0]));
+}
+function pointInRegion(box,frame,u,v) {
+  if(frame==='slant-up')v=.15*(1-u)+.85*v;
+  if(frame==='slant-down')v=.15*u+.85*v;
+  return [box[0]+box[2]*u,box[1]+box[3]*v];
+}
+function renderBoard() {
+  if (!doc?.pages.length) return;
+  const opts = options(), H = 500 * opts.height / opts.width, pg = doc.pages[selected].plan;
+  const layer=i=>pg.layout==='free' ? ({borderless:0,inset:2}[pg.panels[i].region.frame] ?? 1) : 1;
+  const drawing=boxes().map((box,i)=>({box,i})).sort((a,b)=>layer(a.i)-layer(b.i));
+  $('board').innerHTML = `<svg viewBox="0 0 500 ${H}" aria-label="페이지 콘티와 인물 위치"><rect width="500" height="${H}" fill="#fff"/>` + drawing.map(({box:[x,y,w,h],i})=>{
+    const panel = pg.panels[i], frame=pg.layout==='free' ? panel.region.frame : 'rectangle', px=x*500+7, py=y*H+7, pw=w*500-14, ph=h*H-14;
+    const polygon=[[0,0],[1,0],[1,1],[0,1]].map(([u,v])=>{const [a,b]=pointInRegion([x,y,w,h],frame,u,v);return `${a*500},${b*H}`;}).join(' ');
+    const summary = Array.from(panel.summary).slice(0,Math.floor(pw/13)*2).join('');
+    const rows = summary.match(new RegExp(`.{1,${Math.max(1,Math.floor(pw/13)-1)}}`,'gu')) || [];
+    return `<g><polygon data-panel-shape="${i}" points="${polygon}" fill="#f8fafc" stroke="${frame==='borderless'?'none':'#263749'}" stroke-width="${frame==='inset'?4:2}"/><text x="${px+10}" y="${py+22}" fill="#526980" font-size="14" font-weight="600">${i+1}</text>${rows.map((row,k)=>`<text x="${px+10}" y="${py+43+k*16}" font-size="12" fill="#526980">${esc(row)}</text>`).join('')}${panel.subjects.map((s,j)=>{
+      const [a,b]=pointInRegion([x,y,w,h],frame,s.x,s.y);
+      const cx=a*500, cy=b*H, name=doc.outline.characters.find(c=>c.id===s.character)?.name;
+      return `<g class="marker" data-marker="${i},${j}" transform="translate(${cx},${cy})"><circle r="15" fill="${j%2 ? '#c77d43' : '#3b7bac'}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="5" font-size="12" fill="white">${j+1}</text><text text-anchor="middle" y="31" fill="#263749" font-size="12" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(name)}</text></g>`;
+    }).join('')}</g>`;
+  }).join('')+'</svg>';
+}
+function imageUrl(image) { return new URL('api/file/'+encodeURIComponent(image.workspace)+'/'+image.file.split('/').map(encodeURIComponent).join('/'), hostBase).href; }
+function renderResult(version) {
+  if (!doc?.pages.length) return;
+  const images = doc.pages[selected].images;
+  if (!images.length) { $('result').innerHTML = '<p class="hint">아직 생성된 이미지가 없습니다. 기획을 확인하고 이 페이지를 생성해 주세요.</p>'; return; }
+  const at = version ?? images.length-1, image = images[at], url = imageUrl(image);
+  $('result').innerHTML = `<select id="version" aria-label="생성 버전">${images.map((im,i)=>`<option value="${i}" ${i===at?'selected':''}>생성 ${i+1} · 시드 ${esc(im.seed)}</option>`).join('')}</select><a href="${esc(url)}" target="_blank" rel="noreferrer"><img src="${esc(url)}" alt="${selected+1}페이지 생성 결과"></a><p class="hint">${esc(image.file)}</p>`;
+  $('version').onchange = e => renderResult(+e.target.value);
+}
+function renderPrompts() {
+  const p = doc?.compiled?.[selected];
+  if (!p) return;
+  $('prompts').innerHTML = `<p class="hint">베이스 프롬프트</p><pre>${esc(p.prompt)}</pre><p class="hint">네거티브 프롬프트</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>`<p class="hint">위치 프롬프트 ${i+1} (${c.center.x}, ${c.center.y})</p><pre>${esc(c.prompt)}</pre>`).join('');
+}
+
+document.querySelector('.editor').addEventListener('input', e => {
+  const el=e.target;
+  if (busy()) return;
+  if(el.id==='replanInstructions'){replanDirections.set(`${doc.id}:${selected}`,el.value);return;}
+  const panelIndex = Number(el.closest('[data-panel]')?.dataset.panel), pg = doc.pages[selected].plan;
+  if (el.dataset.pageField) {
+    if(el.dataset.pageField==='layout' && el.value==='free' && pg.layout!=='free') {
+      boxes().forEach(([x,y,w,h],i)=>pg.panels[i].region={x,y,w,h,frame:'rectangle'});
+    }
+    pg[el.dataset.pageField] = el.value;
+    if(el.dataset.pageField==='layout'){renderEditor();controls();}
+  }
+  else if(el.dataset.regionField) {
+    const r=pg.panels[panelIndex].region, key=el.dataset.regionField;
+    if(key==='frame') r.frame=el.value;
+    else {
+      const v=Number(el.value);
+      if(!Number.isFinite(v))return;
+      r[key]=Math.max(key==='w'||key==='h'?.05:0,Math.min(key==='x'||key==='y'?.95:1,v));
+      if(key==='x'||key==='w') r.w=Math.min(r.w,1-r.x);
+      if(key==='y'||key==='h') r.h=Math.min(r.h,1-r.y);
+    }
+  }
+  else if (el.dataset.panelField) pg.panels[panelIndex][el.dataset.panelField] = el.value;
+  else if (el.dataset.subjectField) {
+    const field=el.dataset.subjectField;
+    pg.panels[panelIndex].subjects[+el.closest('[data-subject]').dataset.subject][field] = (field==='action' || field==='camera') ? el.value : +el.value;
+  } else if (el.dataset.lineField) pg.panels[panelIndex].dialogue[+el.closest('[data-line]').dataset.line][el.dataset.lineField] = el.value;
+  else if (el.dataset.charField) doc.outline.characters[+el.closest('[data-character]').dataset.character][el.dataset.charField] = el.value;
+  markDirty(); renderBoard();
+});
+document.querySelector('.editor').addEventListener('click', e => {
+  if(e.target.closest('#replanPage')) {
+    const instructions=$('replanInstructions').value;
+    perform(async()=>{await saveLlm();adopt(await api(`projects/${doc.id}/replan`,'POST',{revision:doc.revision,page:selected,instructions}));},'페이지 재기획 준비','replanPage');
+    return;
+  }
+  if(e.target.closest('#deletePage')) {
+    if(busy() || !confirm(`${selected+1}페이지를 지울까요? 콘티와 이미지 목록이 지워지고, 생성된 파일은 워크스페이스에 남습니다.`)) return;
+    perform(async()=>{const next=await api(`projects/${doc.id}/pages/${selected}/delete`,'POST',{revision:doc.revision});selected=Math.max(0,selected-1);adopt(next);},'페이지 삭제','deletePage');
+    return;
+  }
+  const region=e.target.closest('[data-region-toggle]');
+  if (region && !busy()) {
+    const key=`${doc.id}:${selected}:${region.dataset.regionToggle}`;
+    regionOpen.has(key) ? regionOpen.delete(key) : regionOpen.add(key);
+    renderEditor(); controls(); return;
+  }
+  const add=e.target.closest('[data-add-line]'), remove=e.target.closest('[data-remove-line]');
+  if (busy() || (!add && !remove)) return;
+  if (add) { const p=doc.pages[selected].plan.panels[+add.dataset.addLine]; if(p.dialogue.length<3) p.dialogue.push({speaker:p.subjects[0]?.character || '',text:'...'}); }
+  if (remove) doc.pages[selected].plan.panels[+remove.closest('[data-panel]').dataset.panel].dialogue.splice(+remove.dataset.removeLine,1);
+  markDirty(); renderEditor(); controls();
+});
+document.querySelector('.editor').addEventListener('change',e=>{
+  if(e.target.dataset.regionField && !busy()){renderEditor();renderBoard();controls();}
+});
+$('board').addEventListener('pointerdown', e => {
+  const marker=e.target.closest('[data-marker]');
+  if (!marker || busy()) return;
+  e.preventDefault();
+  const [pi,si]=marker.dataset.marker.split(',').map(Number), svg=marker.ownerSVGElement;
+  const [x,y,w,h]=boxes()[pi], panel=doc.pages[selected].plan.panels[pi], subject=panel.subjects[si], frame=doc.pages[selected].plan.layout==='free'?panel.region.frame:'rectangle';
+  const move = event => {
+    const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    subject.x = Math.round(Math.max(.05,Math.min(.95,(point.x/500-x)/w))*100)/100;
+    let v=(point.y/svg.viewBox.baseVal.height-y)/h;
+    if(frame==='slant-up')v=(v-.15*(1-subject.x))/.85;
+    if(frame==='slant-down')v=(v-.15*subject.x)/.85;
+    subject.y = Math.round(Math.max(.05,Math.min(.95,v))*100)/100;
+    const [a,b]=pointInRegion([x,y,w,h],frame,subject.x,subject.y);
+    marker.setAttribute('transform',`translate(${a*500},${b*svg.viewBox.baseVal.height})`);
+  };
+  const end = () => {svg.removeEventListener('pointermove',move);svg.removeEventListener('pointerup',end);svg.removeEventListener('pointercancel',end);markDirty();renderEditor();renderBoard();controls();};
+  svg.setPointerCapture(e.pointerId);svg.addEventListener('pointermove',move);svg.addEventListener('pointerup',end);svg.addEventListener('pointercancel',end);
+});
+$('pageNav').onclick = async e => { const tab=e.target.closest('[data-page]');if (!tab)return;try{await persist();selected=+tab.dataset.page;render();}catch(e){error(e);} };
+$('boardMode').onclick=()=>setMode('board');$('imageMode').onclick=()=>setMode('image');
+$('save').onclick=()=>persist().then(()=>{clearError();render();}).catch(error);
+for (const id of optionIds) $(id).addEventListener('change',()=>{
+  if(id==='size' && $('size').value!=='custom'){const [w,h]=$('size').value.split(',');$('width').value=w;$('height').value=h;}
+  if(id==='width'||id==='height')syncSize();
+  draft();markDirty();if(id==='dialogue'&&doc?.pages.length)renderEditor();renderBoard();controls();
+});
+$('story').addEventListener('input',draft);
+$('example').onclick=()=>{$('story').value='키타가와 마린이 고죠네 집에 놀러 갔다. 고죠가 소파에서 자고 있길래 몰래 다가가 볼을 콕 찌른다. 가까이서 얼굴을 보다가 두근거려 당황하는 순간 고죠가 눈을 뜨고, 둘 다 얼굴이 빨개진다. 귀엽고 설레는 일상 로맨스.';draft();};
+async function perform(fn,label='요청 처리',target='') {
+  if (requesting) return;
+  requesting=true;
+  activeOperation={label,target,started_at:Date.now()/1000};
+  clearError();
+  try {controls();await persist();await fn();}
+  catch(e){error(e);}
+  finally{requesting=false;activeOperation=null;controls();}
+}
+/** 새 만화 · 남은 기획 잇기 · 이어서 그리기를 한 창구가 받는다 (사용자 지시 2026-09-15:
+ *  *"최초 생성이나 이어서 생성이나 똑같은 창구를 써도 상관없지 않나? 두개가 있으니까 오히려 헷갈림"*).
+ *  ★처음부터 다시 만드는 길은 상단 「새 만화」 하나다 — 전체 재기획 버튼을 없앴다. */
+async function start(automatic) {
+  await perform(async()=>{
+    const text=$('story').value.trim(), pages=+$('pageCount').value;
+    if (!doc && !text) throw new Error('무엇을 그릴지 적어 주세요.');
+    await saveLlm();
+    if (!config.llm.ready) throw new Error('선택한 CLI의 설치 상태 또는 API 공급자의 키 설정을 확인해 주세요.');
+    if (!doc) {
+      selected=0;mode='board';
+      adopt(await api('projects','POST',{story:text,options:{...options(),pages},automatic}));
+    } else if (!doc.outline || doc.pages.length < doc.outline.pages.length) {
+      adopt(await api(`projects/${doc.id}/plan`,'POST',{automatic}));
+    } else {
+      adopt(await api(`projects/${doc.id}/continue`,'POST',{revision:doc.revision,pages,instructions:text,automatic}));
+    }
+    $('story').value='';$('pageCount').value='0';draft();
+    await listProjects();
+  },'기획 요청 준비',automatic?'automatic':'plan');
+}
+$('plan').onclick=()=>start(false);$('automatic').onclick=()=>start(true);
+const generate = page => perform(async()=>{adopt(await api(`projects/${doc.id}/generate`,'POST',{revision:doc.revision,...(page===undefined?{}:{page})}));},'생성 요청 준비',page===undefined?'generateAll':'generatePage');
+$('generatePage').onclick=()=>generate(selected);$('generateAll').onclick=()=>generate();
+$('stop').onclick=()=>perform(async()=>{adopt(await api(`projects/${doc.id}/stop`,'POST',{}));await listProjects();},'즉시 중단','stop');
+function resetComposition(){ $('layoutMode').value='free';$('maxPanels').value='0';$('dialogue').value='ko'; }
+$('new').onclick=()=>perform(async()=>{doc=null;selected=0;dirty=false;try{localStorage.removeItem('manga-maker-current');}catch{}$('story').value='';$('projects').value='';resetComposition();draft();render();});
+$('projects').onchange=()=>perform(async()=>{const id=$('projects').value;if(id){selected=0;adopt(await api(`projects/${id}`));}else{doc=null;selected=0;$('story').value='';try{localStorage.removeItem('manga-maker-current');}catch{}render();}});
+$('export').onclick=()=>perform(async()=>{
+  const response=await fetch(new URL(`projects/${doc.id}/export`,base));
+  if(!response.ok)throw new Error('ZIP을 저장하지 못했습니다.');
+  const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');
+  a.href=url;a.download=`만화-${doc.outline?.title || doc.id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+});
+
+async function init() {
+  config=await api('config');
+  $('negativePrompt').value=config.default_negative;
+  $('workspace').innerHTML='<option value="">워크스페이스 선택</option>'+config.workspaces.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+  $('account').innerHTML=config.accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  renderLlm();
+  try {
+    const saved=JSON.parse(localStorage.getItem('manga-maker-draft') || 'null');
+    if(saved){$('story').value=saved.story;putOptions(saved.options);$('pageCount').value=saved.options.pages ?? 0;if(!saved.options.layout_mode)resetComposition();}
+    const current=localStorage.getItem('manga-maker-current');
+    if(current)adopt(await api(`projects/${current}`));
+  }catch(e){error(e);}
+  if (!doc && window.peropix?.inApp) {
+    try {const state=await peropix.state();if(config.workspaces.includes(state.workspace))$('workspace').value=state.workspace;}catch{}
+  }
+  await listProjects();render();
+  try{await listStyles();}catch(e){error(e);$('refreshStyles').disabled=false;}
+  setInterval(async()=>{
+    if (!doc || !busyStates.includes(doc.status) || requesting || saving || dirty) return;
+    const id=doc.id;
+    try{const next=await api(`projects/${id}`);if(doc?.id!==id)return;if(next.revision>doc.revision){adopt(next);if(!busyStates.includes(next.status))await listProjects();}else if(next.revision===doc.revision){doc.queue_state=next.queue_state;updateActivity();}}
+    catch(e){error(e);}
+  },1500);
+}
+window.addEventListener('beforeunload',e=>{if(dirty || saving){e.preventDefault();e.returnValue='';}});
+$('llmProvider').onchange=()=>{
+  const provider=$('llmProvider').value, p=config.llm.providers.find(x=>x.id===provider);
+  modelRows=modelsBy[provider]?.models || [];
+  renderModels(p?.model || '');
+  renderEffort('');
+  $('llm').textContent='모델을 고르면 저장됩니다.';
+  controls();
+  if(p && p.engine!=='cli' && !modelsBy[provider]) void loadModels(provider);
+};
+// ★모델·강도는 고르는 즉시 저장한다. perform 을 쓰지 않는다 — 저장이 도는 동안 화면이 잠겨
+//   바로 다음 선택이 막혔다 (2026-09-15).
+let llmSaveChain=Promise.resolve();
+// ★한 줄로 이어 붙인다 — 공급자와 모델을 잇따라 바꾸면 먼저 보낸 저장이 늦게 끝나
+//   앞선 선택으로 되돌아갔다 (2026-09-15).
+const autoSaveLlm=()=>{llmSaveChain=llmSaveChain.then(saveLlm).catch(error);};
+$('llmModel').onchange=()=>{renderEffort('');autoSaveLlm();};
+$('llmEffort').onchange=autoSaveLlm;
+$('llmRefresh').onclick=()=>perform(async()=>{config.llm=await api('llm');renderLlm();await loadModels($('llmProvider').value,true);},'LLM 설정 확인','llmRefresh');
+// ★목록에서 고르면 그대로 적용된다 — 「선택한 화풍 적용」 버튼을 없앴고, 이름 변경·삭제는
+//   목록 항목 안의 버튼이 맡는다 (사용자 지시 2026-09-15).
+const styleIcons={
+  pencil:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5 13.5 4.5 5.5 12.5 3 13l.5-2.5z"/></svg>',
+  trash:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/></svg>',
+  check:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>',
+  cross:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>',
+};
+function renderStyles(){
+  const current=savedStyles.find(s=>s.id===selectedStyle);
+  $('stylePickerLabel').textContent=current?.name || (savedStyles.length?'저장된 화풍 선택':'저장된 화풍 없음');
+  $('styleList').innerHTML = savedStyles.length ? savedStyles.map(s=>s.id===renamingStyle
+    ? `<div class="style-row" data-style="${esc(s.id)}"><input class="style-rename-input" maxlength="120" aria-label="화풍 이름" value="${esc(s.name)}"><button class="icon-btn" data-rename-ok="${esc(s.id)}" aria-label="이름 저장" title="이름 저장">${styleIcons.check}</button><button class="icon-btn" data-rename-cancel="1" aria-label="이름 변경 취소" title="취소">${styleIcons.cross}</button></div>`
+    : `<div class="style-row" data-style="${esc(s.id)}"><button class="style-pick" role="option" aria-selected="${s.id===selectedStyle}" data-pick="${esc(s.id)}">${esc(s.name)}</button><button class="icon-btn" data-rename="${esc(s.id)}" aria-label="이름 변경" title="이름 변경">${styleIcons.pencil}</button><button class="icon-btn" data-delete="${esc(s.id)}" aria-label="삭제" title="삭제">${styleIcons.trash}</button></div>`).join('')
+    : '<p class="style-empty">저장된 화풍이 없습니다.</p>';
+  controls();
+}
+function openStyleList(open){
+  $('styleList').hidden=!open;
+  $('stylePicker').setAttribute('aria-expanded',String(open));
+  if(!open)renamingStyle='';
+  renderStyles();
+}
+async function listStyles(id=selectedStyle){
+  const data=await api('styles');
+  savedStyles=data.items;stylesReady=true;
+  selectedStyle=savedStyles.some(s=>s.id===id)?id:'';
+  renamingStyle='';
+  renderStyles();
+}
+function rememberStyle(item){
+  savedStyles=[item,...savedStyles.filter(s=>s.id!==item.id)];
+  stylesReady=true;selectedStyle=item.id;renamingStyle='';
+  renderStyles();
+}
+async function applyStyleData(data){
+  $('stylePrompt').value=data.style_prompt;
+  $('style').value=data.style_prompt.trim() ? 'custom' : $('style').value;
+  $('negativePrompt').value=data.negative_prompt;
+  for(const [key,value] of Object.entries(data.generation_options || {}))if(generationFields[key])$(generationFields[key]).value=value;
+  syncSize();
+  const imported=Object.entries(data.generation_options || {}).filter(([key])=>generationFields[key]).map(([key,value])=>`${generationLabels[key]} ${value}`);
+  $('importedOptions').hidden=false;
+  $('importedOptions').textContent=(imported.length ? `가져옴: ${imported.join(' · ')}. 기록되지 않은 값은 유지됩니다.` : '기록된 생성 옵션이 없어 현재 설정을 유지합니다.') + (data.skipped_options?.length ? ` 적용할 수 없는 값: ${data.skipped_options.map(k=>generationLabels[k] || k).join(', ')}.` : '');
+  referenceName=data.reference_name || '';
+  $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '';
+  $('styleRefPreview').hidden=true;
+  if(referencePreviewUrl){URL.revokeObjectURL(referencePreviewUrl);referencePreviewUrl='';}
+  draft();if(doc?.outline){dirty=true;await persist();renderBoard();}
+}
+$('stylePicker').onclick=()=>{if(!busy()&&stylesReady)openStyleList($('styleList').hidden);};
+// ★`isConnected` 를 먼저 본다 — 목록을 다시 그리면 눌린 버튼이 문서에서 떨어져 나가고,
+//   그 상태의 closest() 는 언제나 null 이라 방금 연 목록이 그대로 닫혔다 (2026-09-15).
+document.addEventListener('click',e=>{if(!$('styleList').hidden&&e.target.isConnected&&!e.target.closest('.style-picker'))openStyleList(false);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('styleList').hidden)openStyleList(false);});
+$('styleList').addEventListener('keydown',e=>{
+  if(!e.target.classList.contains('style-rename-input'))return;
+  if(e.key==='Enter'){e.preventDefault();$('styleList').querySelector('[data-rename-ok]')?.click();}
+  if(e.key==='Escape'){e.stopPropagation();renamingStyle='';renderStyles();}
+});
+$('styleList').addEventListener('click',e=>{
+  if(busy())return;
+  const pick=e.target.closest('[data-pick]'), rename=e.target.closest('[data-rename]'),
+        ok=e.target.closest('[data-rename-ok]'), cancel=e.target.closest('[data-rename-cancel]'),
+        remove=e.target.closest('[data-delete]');
+  if(pick)perform(async()=>{
+    const item=await api(`styles/${pick.dataset.pick}`);
+    rememberStyle(item);openStyleList(false);await applyStyleData(item);
+    $('styleLibraryStatus').textContent=`「${item.name}」 적용됨`;
+  },'저장된 화풍 적용','stylePicker');
+  else if(rename){renamingStyle=rename.dataset.rename;renderStyles();$('styleList').querySelector('.style-rename-input')?.focus();}
+  else if(cancel){renamingStyle='';renderStyles();}
+  else if(ok)perform(async()=>{
+    const name=($('styleList').querySelector('.style-rename-input')?.value || '').trim();
+    if(!name)throw new Error('화풍 이름을 입력해 주세요.');
+    const item=await api(`styles/${ok.dataset.renameOk}`,'PATCH',{name});
+    rememberStyle(item);$('styleLibraryStatus').textContent=`「${item.name}」 이름 변경됨`;
+  },'화풍 이름 변경','stylePicker');
+  else if(remove){
+    const id=remove.dataset.delete, name=savedStyles.find(s=>s.id===id)?.name || '';
+    if(!confirm(`「${name}」 화풍을 지울까요? 이미 적용된 설정과 프로젝트는 그대로 남습니다.`))return;
+    perform(async()=>{
+      await api(`styles/${id}`,'DELETE');
+      if(selectedStyle===id)selectedStyle='';
+      await listStyles();
+      $('styleLibraryStatus').textContent=`「${name}」 삭제됨. 현재 적용된 설정과 프로젝트는 유지됩니다.`;
+    },'화풍 삭제','stylePicker');
+  }
+});
+$('refreshStyles').onclick=()=>perform(async()=>{await listStyles();$('styleLibraryStatus').textContent=`저장된 화풍 ${savedStyles.length}개`;} ,'화풍 목록 불러오기','refreshStyles');
+$('saveStyle').onclick=()=>perform(async()=>{
+  const o=options();
+  const suggested=referenceName ? referenceName.replace(/\.[^.]+$/,'') : `화풍 ${savedStyles.length+1}`;
+  const name=(window.prompt('새 화풍의 이름', suggested) || '').trim();
+  if(!name)return;
+  const item=await api('styles','POST',{name,style_prompt:o.style_prompt,negative_prompt:o.negative_prompt,reference_name:referenceName,
+    generation_options:Object.fromEntries(Object.keys(generationFields).map(key=>[key,o[key]]))});
+  rememberStyle(item);$('styleLibraryStatus').textContent=`「${item.name}」 새 화풍으로 저장됨`;
+},'화풍 저장','saveStyle');
+for(const event of ['input','change'])$('stylePrompt').addEventListener(event,()=>{
+  if($('stylePrompt').value.trim()&&$('style').value!=='custom')$('style').value='custom';   // 적는 순간 내 화풍으로
+  controls();
+});
+async function importStyle(file) {
+  if(!file || busy())return;
+  await perform(async()=>{
+    await saveLlm();
+    $('styleRefName').textContent='원본 프롬프트에서 화풍 추출 중…';
+    const body=new FormData();body.append('file',file);
+    try {
+      const response=await fetch(new URL('style-reference',base),{method:'POST',body});
+      const data=await response.json();
+      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'참고 이미지 화풍 추출에 실패했습니다.');
+      rememberStyle(data);
+      $('styleLibraryStatus').textContent=`「${data.name}」 추출 후 자동 저장됨`;
+      await applyStyleData(data);
+      if(URL.createObjectURL){
+        referencePreviewUrl=URL.createObjectURL(file);
+        $('styleRefPreview').src=referencePreviewUrl;$('styleRefPreview').hidden=false;
+      }
+    } finally {
+      $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '참고 이미지 없음';
+      $('styleImage').value='';
+    }
+  },'참고 이미지 가져오기','styleImage');
+}
+$('styleImage').onchange=e=>importStyle(e.target.files[0]);
+$('styleRefDrop').ondragover=e=>{e.preventDefault();};
+$('styleRefDrop').ondrop=e=>{e.preventDefault();importStyle(e.dataTransfer.files[0]);};
+$('translateDialogue').onclick=()=>perform(async()=>{await saveLlm();adopt(await api(`projects/${doc.id}/translate`,'POST',{revision:doc.revision}));},'대사 번역 준비','translateDialogue');
+$('previewWidth').oninput=()=>{viewPrefs.width=+$('previewWidth').value;viewPrefs.fit=false;applyView();saveView();};
+$('fitPreview').onclick=()=>{viewPrefs.fit=true;applyView();saveView();};
+$('toggleSetup').onclick=()=>{viewPrefs.setupOpen=!viewPrefs.setupOpen;applyView();saveView();};
+$('toggleEditor').onclick=()=>{viewPrefs.editorOpen=!viewPrefs.editorOpen;applyView();saveView();};
+function showTab(name){
+  viewPrefs.tab=name;
+  for(const el of document.querySelectorAll('.tabitem'))el.setAttribute('aria-selected',String(el.dataset.tab===name));
+  for(const el of document.querySelectorAll('.tabpane'))el.hidden=el.dataset.pane!==name;
+}
+for(const el of document.querySelectorAll('.tabitem'))el.onclick=()=>{showTab(el.dataset.tab);saveView();};
+showTab(document.querySelector(`.tabitem[data-tab="${viewPrefs.tab}"]`) ? viewPrefs.tab : 'story');
+if(window.ResizeObserver)new ResizeObserver(updateWidthLabel).observe(document.querySelector('.stage'));
+applyView();setInterval(updateActivity,1000);
+init().catch(error);

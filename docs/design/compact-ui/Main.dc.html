@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; }
+    a { color: #8ec0e9; } a:hover { color: #b5d6f2; }
+    .mm { font-family: "Pretendard Variable", Pretendard, "Segoe UI", "Malgun Gothic", sans-serif; font-weight: 370; font-size: 14px; line-height: 1.5; color: var(--ink); background: var(--bg); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 0 12px; font-family: inherit; font-size: 13px; line-height: 1; color: var(--ink-soft); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; white-space: nowrap; }
+    .btn.primary { font-weight: 500; color: var(--accent-on); background: var(--accent); border-color: var(--accent); }
+    .btn.ghost { background: none; border-color: transparent; }
+    .btn.icon { padding: 0; width: 28px; }
+    .btn.on { border-color: var(--accent); background: var(--accent-bg); color: var(--ink); }
+    .btn.off { opacity: 0.5; }
+    .in { display: flex; align-items: center; min-height: 28px; padding: 4px 10px; font-size: 13px; line-height: 1.4; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; min-width: 0; white-space: nowrap; overflow: hidden; }
+    .in.ph { color: var(--ink-faint); }
+    .in.sel { justify-content: space-between; gap: 6px; }
+    .lab { font-size: 12px; color: var(--ink-soft); }
+    .mono { font-family: ui-monospace, Consolas, "D2Coding", monospace; font-variant-numeric: tabular-nums; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; }
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .tabitem { padding: 7px 10px 8px; font-size: 13px; color: var(--ink-soft); border-bottom: 2px solid transparent; white-space: nowrap; }
+    .tabitem.cur { color: var(--ink); font-weight: 500; border-bottom-color: var(--accent); }
+    .tab { display: flex; align-items: center; gap: 8px; min-width: 120px; max-width: 180px; padding: 8px 10px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
+    .tab b { font-size: 14px; font-weight: 560; color: var(--accent-ink); }
+    .tab span { display: flex; flex-direction: column; font-size: 13px; color: var(--ink); line-height: 1.3; min-width: 0; }
+    .tab small { font-size: 12px; color: var(--ink-soft); }
+    .tab.cur { border-color: var(--accent); background: var(--accent-bg); }
+    svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  </style>
+</helmet>
+<div class="mm" style="--bg: {{t.bg}}; --panel: {{t.panel}}; --code-bg: {{t.code}}; --line: {{t.line}}; --line-soft: {{t.lineSoft}}; --ink: {{t.ink}}; --ink-soft: {{t.inkSoft}}; --ink-dim: {{t.inkDim}}; --ink-faint: {{t.inkFaint}}; --accent: {{t.accent}}; --accent-ink: {{t.accentInk}}; --accent-bg: {{t.accentBg}}; --accent-on: {{t.accentOn}}; --err-ink: {{t.err}}; width: 1440px; height: 900px; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg viewBox="0 0 32 32" style="width: 24px; height: 24px; fill: none; stroke: var(--accent-ink); stroke-width: 1.8;"><rect x="3" y="3" width="26" height="26" rx="4"></rect><path d="M3 14h26M16 14v15M10 8h11M9 20h2M21 20h2"></path></svg>
+      <span style="font-size: 16px; font-weight: 560;">만화 제작기</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div class="in sel" style="width: 220px;"><span>잠깐의 두근거림</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div>
+      <div class="btn">새 만화</div>
+      <div class="btn">ZIP 저장</div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 288px minmax(0, 1fr); flex: 1 1 auto; min-height: 0;">
+    <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--panel); border-right: 1px solid var(--line); min-height: 0; overflow: hidden;">
+      <div class="card" style="padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 13px; font-weight: 500;">이번에 그릴 내용</span>
+          <div class="btn ghost" style="min-height: 22px; padding: 0 6px; font-size: 12px;">예시 넣기</div>
+        </div>
+        <div class="in ph" style="height: 66px; align-items: flex-start; white-space: normal; line-height: 1.5; padding: 8px 10px;">무엇을 그릴지 적어 주세요. 이어서 그릴 때 비우면 앞 내용에서 자연스럽게 이어집니다.</div>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span class="lab">장수</span>
+          <div class="in sel" style="flex: 1 1 auto;"><span>자동</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div>
+        </div>
+        <div style="display: flex; gap: 6px; justify-content: center;">
+          <div class="btn">콘티 생성</div>
+          <div class="btn primary">콘티 + 이미지 생성</div>
+        </div>
+      </div>
+    </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); flex: 0 0 auto;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span class="lab">기획 LLM</span>
+          <div class="btn ghost" style="min-height: 22px; padding: 0 6px; font-size: 12px;">목록 새로고침</div>
+        </div>
+        <div class="in sel"><span>Claude Code</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div>
+        <div style="display: flex; gap: 6px;">
+          <div class="in sel" style="flex: 1 1 auto;"><span>opus</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div>
+          <div class="in sel" style="flex: 0 0 104px;"><span>high</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-top: 6px; flex: 0 0 auto;">
+        <div class="tabitem cur">구성</div>
+        <div class="tabitem">화풍</div>
+        <div class="tabitem">생성</div>
+        <div class="tabitem">저장</div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; flex: 0 0 auto;">
+        <div class="field"><span class="lab">페이지당 최대 컷</span><div class="in sel"><span>자동</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div></div>
+        <div class="field"><span class="lab">컷 구성</span><div class="in sel"><span>자유 배치</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div></div>
+        <div class="field"><span class="lab">그림</span><div class="in sel"><span>흑백 만화</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div></div>
+        <div class="field"><span class="lab">읽는 방향</span><div class="in sel"><span>오른쪽부터</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div></div>
+        <div class="field" style="grid-column: 1 / -1;"><span class="lab">대사 언어</span><div class="in sel"><span>한국어</span><svg class="i" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"></path></svg></div></div>
+      </div>
+      <div class="btn" style="flex: 0 0 auto;">기존 대사를 한국어로 번역</div>
+
+      <div style="flex: 1 1 auto; min-height: 0;"></div>
+        <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; min-height: 0; overflow: hidden;">
+      <div class="card" style="display: flex; align-items: center; gap: 10px; padding: 8px 14px; min-height: 44px;">
+        <span style="font-size: 15px; font-weight: 560;">잠깐의 두근거림</span>
+        <span style="font-size: 12px; font-weight: 500; color: var(--ink-soft); background: var(--code-bg); border-radius: 9px; padding: 3px 8px;">생성 완료</span>
+        <span class="lab" style="flex: 1 1 auto;">요청한 페이지를 모두 생성했습니다.</span>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div class="tab cur"><b>01</b><span>가까워지는 거리<small>5컷 · 생성 2장</small></span></div>
+        <div class="tab"><b>02</b><span>들킴<small>5컷 · 생성 1장</small></span></div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div style="display: flex; gap: 5px;">
+          <div class="btn on">콘티</div>
+          <div class="btn">생성 이미지</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <span class="lab" style="margin-right: 4px;">저장됨</span>
+          <div class="btn">변경사항 저장</div>
+          <div class="btn">이 페이지 생성</div>
+          <div class="btn primary off">남은 0페이지 생성</div>
+          <div class="btn ghost icon" title="화면에 맞춤"><svg class="i" viewBox="0 0 16 16"><path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3"></path></svg></div>
+          <div class="btn ghost icon" title="편집창 접기"><svg class="i" viewBox="0 0 16 16"><path d="M2 3h12v10H2zM10 3v10M7 6l-2 2 2 2"></path></svg></div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; flex: 1 1 auto; min-height: 0;">
+        <div style="display: flex; justify-content: center; align-items: flex-start; padding: 12px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 9px; min-height: 0; overflow: hidden;">
+          <svg viewBox="0 0 500 730" style="width: 372px; height: 543px; flex: 0 0 auto; font-family: inherit;">
+            <rect width="500" height="730" fill="#ffffff"></rect>
+            <polygon points="0,504 500,504 500,730 0,730" fill="#f8fafc" stroke="none"></polygon>
+            <text x="10" y="526" fill="#526980" font-size="14" font-weight="600">4</text>
+            <text x="10" y="546" fill="#526980" font-size="12">가까운 얼굴에 두근거린다</text>
+            <circle cx="250" cy="628" r="16" fill="#2f6fa8"></circle><text x="250" y="633" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">1</text><text x="250" y="660" fill="#263749" font-size="12" text-anchor="middle">마린</text>
+            <polygon points="215,0 500,0 500,474 215,474" fill="#f8fafc" stroke="#263749" stroke-width="2"></polygon>
+            <text x="225" y="22" fill="#526980" font-size="14" font-weight="600">1</text>
+            <text x="225" y="43" fill="#526980" font-size="12">고죠의 집에 도착한 마린</text>
+            <circle cx="343" cy="284" r="16" fill="#2f6fa8"></circle><text x="343" y="289" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">1</text><text x="343" y="316" fill="#263749" font-size="12" text-anchor="middle">마린</text>
+            <polygon points="0,0 200,0 200,182 0,182" fill="#f8fafc" stroke="#263749" stroke-width="2"></polygon>
+            <text x="10" y="22" fill="#526980" font-size="14" font-weight="600">2</text>
+            <text x="10" y="43" fill="#526980" font-size="12">소파에서 잠든 고죠</text>
+            <circle cx="100" cy="109" r="16" fill="#2f6fa8"></circle><text x="100" y="114" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">1</text><text x="100" y="141" fill="#263749" font-size="12" text-anchor="middle">고죠</text>
+            <polygon points="0,245 200,204 200,434 0,474" fill="#f8fafc" stroke="#263749" stroke-width="2"></polygon>
+            <text x="10" y="266" fill="#526980" font-size="14" font-weight="600">3</text>
+            <text x="10" y="287" fill="#526980" font-size="12">살며시 볼을 찌른다</text>
+            <circle cx="50" cy="338" r="16" fill="#2f6fa8"></circle><text x="50" y="343" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">1</text><text x="50" y="370" fill="#263749" font-size="12" text-anchor="middle">마린</text>
+            <circle cx="130" cy="345" r="16" fill="#c9782f"></circle><text x="130" y="350" fill="#ffffff" font-size="13" font-weight="600" text-anchor="middle">2</text><text x="130" y="377" fill="#263749" font-size="12" text-anchor="middle">고죠</text>
+            <polygon points="30,526 155,526 155,687 30,687" fill="#f8fafc" stroke="#263749" stroke-width="4"></polygon>
+            <text x="40" y="548" fill="#526980" font-size="14" font-weight="600">5</text>
+            <text x="40" y="569" fill="#526980" font-size="12">창가의 오후</text>
+          </svg>
+        </div>
+        <div style="min-height: 0; overflow: hidden; border-radius: 9px;">
+          <dc-import name="Editor" theme="{{theme}}" hint-size="400px,1100px"></dc-import>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = {
+      dark: { bg: '#16161a', panel: '#1e1e24', code: '#16161a', line: '#2e2e36', lineSoft: '#26262e', ink: '#ececf1', inkSoft: 'rgba(236,236,241,0.72)', inkDim: 'rgba(236,236,241,0.55)', inkFaint: 'rgba(236,236,241,0.42)', accent: '#3a7bb8', accentInk: '#8ec0e9', accentBg: '#1c2a38', accentOn: '#ffffff', err: '#ee8b8b' },
+      light: { bg: '#f5f7f9', panel: '#ffffff', code: '#f4f6f8', line: '#e3e8ee', lineSoft: '#e8ecf1', ink: '#333d49', inkSoft: '#626d79', inkDim: '#78838f', inkFaint: '#98a2ad', accent: '#2f6fa8', accentInk: '#2f6fa8', accentBg: '#e3eef8', accentOn: '#ffffff', err: '#a8433b' },
+    };
+    const theme = this.props.theme || 'dark';
+    return { t: T[theme] || T.dark, theme };
+  }
+}
+</script>
+</body>
+</html>

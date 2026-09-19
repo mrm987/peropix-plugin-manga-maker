@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>만화 제작기</title>
+  <link rel="stylesheet" href="../../_app/base.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="../../_app/peropix.js"></script>
+  <script type="module" src="app.js?v=1.1.1"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="26" height="26" rx="4"/><path d="M3 14h26M16 14v15M10 8h11M9 20h2M21 20h2"/></svg><div><h1>만화 제작기</h1><span class="muted">스토리 한 줄에서 만화 한 편으로</span></div></div>
+    <div class="row"><select id="projects" aria-label="저장된 프로젝트"><option value="">새 만화</option></select><button id="new">새 만화</button><button id="export" disabled>ZIP 저장</button></div>
+  </header>
+  <div id="alert" role="alert" hidden></div>
+  <div class="shell">
+    <aside class="setup">
+      <button id="toggleSetup" class="setup-toggle" aria-expanded="true" aria-controls="setupBody"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg><span>설정 접기</span></button>
+      <div id="setupBody">
+
+      <div class="compose">
+        <div class="compose-head"><strong>이번에 그릴 내용</strong><button id="example" class="subtle">예시 넣기</button></div>
+        <textarea id="story" rows="3" aria-label="이번에 그릴 내용" placeholder="무엇을 그릴지 적어 주세요. 이어서 그릴 때 비우면 앞 내용에서 자연스럽게 이어집니다."></textarea>
+        <label class="compose-count">장수<select id="pageCount"><option value="0">자동</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+        <div class="compose-actions">
+          <button id="plan">콘티 생성</button>
+          <button id="automatic" class="primary">콘티 + 이미지 생성</button>
+        </div>
+      </div>
+
+      <div class="llm-fixed">
+        <div class="llm-head"><span>기획 LLM</span><button id="llmRefresh" class="subtle">목록 새로고침</button></div>
+        <select id="llmProvider" aria-label="기획 LLM 공급자"><option value="">앱 API 설정 따르기</option></select>
+        <div class="llm-row">
+          <select id="llmModel" aria-label="기획 LLM 모델"><option value="">모델을 고르세요</option></select>
+          <select id="llmEffort" aria-label="추론 강도" hidden></select>
+        </div>
+        <p id="llm" class="hint">LLM 설정 확인 중</p>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="설정">
+        <button class="tabitem" data-tab="story" role="tab" aria-selected="true">구성</button>
+        <button class="tabitem" data-tab="style" role="tab" aria-selected="false">화풍</button>
+        <button class="tabitem" data-tab="generation" role="tab" aria-selected="false">생성</button>
+        <button class="tabitem" data-tab="destination" role="tab" aria-selected="false">저장</button>
+      </div>
+
+      <div class="tabpane" data-pane="story"><div class="fields two">
+        <label>페이지당 최대 컷<select id="maxPanels"><option value="0">자동</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
+        <label>컷 구성<select id="layoutMode"><option value="free">자유 배치</option><option value="template">고정 템플릿</option></select></label>
+        <label>읽는 방향<select id="direction"><option value="rtl">오른쪽부터</option><option value="ltr">왼쪽부터</option></select></label>
+        <label>대사 언어<select id="dialogue"><option value="ko">한국어</option><option value="ja">일본어</option><option value="en">영어</option><option value="none">대사 없음</option></select></label>
+      </div>
+      <button id="translateDialogue" class="wide" disabled>기존 대사를 선택한 언어로 번역</button>
+      </div>
+
+      <div class="tabpane" data-pane="style" hidden><div class="fields">
+        <label>화풍 선택<select id="style"><option value="mono">흑백 만화</option><option value="color">컬러 만화</option><option value="custom">내 화풍</option></select></label>
+        <div class="style-library" aria-label="저장된 화풍">
+          <div class="style-library-heading"><strong>내 화풍</strong><button id="refreshStyles" class="subtle" title="저장된 화풍 목록 새로고침">새로고침</button></div>
+          <div class="style-picker">
+            <button id="stylePicker" class="style-picker-button" aria-haspopup="listbox" aria-expanded="false" disabled><span id="stylePickerLabel">저장된 화풍 없음</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+            <div id="styleList" class="style-list" role="listbox" aria-label="저장된 화풍" hidden></div>
+          </div>
+        </div>
+        <div id="styleRefDrop" class="reference-drop"><label>참고 이미지 가져오기<input id="styleImage" type="file" accept="image/png,image/jpeg,image/webp"></label><div id="referenceActivity" class="inline-activity" role="status" hidden><span class="spinner" aria-hidden="true"></span>프롬프트와 생성 옵션 가져오는 중</div><img id="styleRefPreview" hidden alt="선택한 화풍 참고 이미지"><p id="styleRefName" class="hint"></p><p id="importedOptions" class="imported-options" role="status" hidden></p></div>
+        <div class="style-text">
+          <label>공통 화풍 프롬프트<textarea id="stylePrompt" rows="3" placeholder="원하는 작화 태그, 분위기, 선의 느낌"></textarea></label>
+          <label>공통 네거티브 프롬프트<textarea id="negativePrompt" rows="4"></textarea></label>
+        </div>
+        <div class="style-save">
+          <button id="saveStyle" class="wide">현재 설정을 새 화풍으로 저장</button>
+          <p id="styleLibraryStatus" class="style-library-status" role="status" aria-live="polite"></p>
+        </div>
+      </div></div>
+
+      <div class="tabpane" data-pane="generation" hidden><div class="fields">
+        <span id="generationSummary" class="summary-value" hidden></span>
+        <label>이미지 모델<select id="model"><option value="nai-diffusion-5-full">NAI V5 Full</option><option value="nai-diffusion-5-curated">NAI V5 Curated</option></select></label>
+        <label>페이지 크기<select id="size"><option value="832,1216">832 × 1216 (기본)</option><option value="1024,1536">1024 × 1536</option><option value="1216,1792">1216 × 1792</option><option value="1216,832">1216 × 832</option><option value="1024,1024">1024 × 1024</option><option value="custom">직접 입력</option></select></label>
+        <div class="fields two"><label>가로 픽셀<input id="width" type="number" min="64" step="64" value="832"></label><label>세로 픽셀<input id="height" type="number" min="64" step="64" value="1216"></label></div>
+        <div class="fields two"><label>스텝<input id="steps" type="number" min="1" max="50" value="28"></label><label>CFG<input id="cfg" type="number" min="0" max="10" step="0.1" value="5"></label></div>
+        <div class="fields two"><label>가이던스 리스케일<input id="cfgRescale" type="number" min="0" max="1" step="0.01" value="0"></label><label>시드<input id="seed" type="number" min="-1" max="4294967295" value="-1"></label></div>
+        <label>샘플러<select id="sampler"><option value="k_euler_ancestral">Euler Ancestral</option><option value="k_euler">Euler</option><option value="k_dpmpp_2m">DPM++ 2M</option><option value="k_dpmpp_2m_sde">DPM++ 2M SDE</option><option value="k_dpmpp_2s_ancestral">DPM++ 2S Ancestral</option><option value="k_dpmpp_sde">DPM++ SDE</option></select></label>
+      </div></div>
+
+      <div class="tabpane" data-pane="destination" hidden><div class="fields">
+        <label>저장할 워크스페이스<select id="workspace"></select></label>
+        <label>NAI 계정<select id="account"></select></label>
+      </div></div>
+
+      </div>
+    </aside>
+    <main>
+      <section id="activityCard" class="progress-card"><span id="activitySpinner" class="spinner large" aria-hidden="true" hidden></span><div><div class="activity-heading"><strong id="projectTitle">이야기를 들려주세요</strong><span id="activityBadge" class="activity-badge">준비</span></div><p id="status" role="status" aria-live="polite">AI가 페이지와 컷을 구성하고, 인물의 위치까지 준비합니다.</p><div id="activityDetail" hidden><div class="activity-meta"><span id="activityCount"></span><span id="elapsed"></span></div><progress id="activityProgress" aria-label="현재 작업의 완료 페이지"></progress></div></div><button id="stop" hidden>멈추기</button></section>
+      <div id="pageNav" class="page-nav" aria-label="페이지 목록"></div>
+      <div id="empty" class="empty"><svg viewBox="0 0 180 210" aria-hidden="true"><rect x="20" y="10" width="140" height="190" rx="3"/><path d="M30 20h120v60H30zM30 90h55v45H30zM95 90h55v45H95zM30 145h120v45H30z"/><circle cx="115" cy="53" r="12"/><path d="M93 79q22-29 44 0M40 120l15-18 20 22M50 175h65"/></svg><h2>한 장씩 이어지는 이야기</h2><p>짧은 줄거리만 있어도 괜찮아요.<br>기획이 끝나면 컷, 대사, 인물 위치를 직접 다듬을 수 있습니다.</p></div>
+      <section id="content" hidden>
+        <div class="toolbar"><div class="row"><button id="boardMode" aria-pressed="true">콘티</button><button id="imageMode" aria-pressed="false">생성 이미지</button></div><div class="row"><span id="saved" class="hint"></span><button id="save">변경사항 저장</button><button id="generatePage">이 페이지 생성</button><button id="generateAll" class="primary">남은 페이지 생성</button></div></div>
+        <div class="view-controls"><label for="previewWidth">보기 너비</label><input id="previewWidth" type="range" min="320" max="2000" step="20" value="1200"><output id="previewWidthValue" for="previewWidth">1200 px</output><button id="fitPreview">화면에 맞춤</button><button id="toggleEditor" aria-expanded="true" aria-controls="editorPane">편집창 접기</button></div>
+        <div class="editing"><div class="stage"><div id="board"></div><div id="result" hidden></div><p id="stageHint" class="hint">점을 끌어 인물의 위치를 조정하세요. 숫자는 읽는 순서입니다.</p></div><div class="editor" id="editorPane"><div id="pageEditor"></div><details id="bible"><summary>공통 캐릭터 설정</summary><div id="characters"></div></details><details><summary>실제 NAI 프롬프트</summary><div id="prompts"></div></details></div></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
