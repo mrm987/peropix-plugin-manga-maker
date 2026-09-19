@@ -22,16 +22,18 @@ const optionIds = ['maxPanels','layoutMode','style','direction','dialogue','size
 function saveView(){try{localStorage.setItem('manga-maker-view',JSON.stringify(viewPrefs));}catch{}}
 function updateWidthLabel(){
   const actual=Math.round(document.querySelector('.stage').getBoundingClientRect().width);
-  $('previewWidthValue').textContent=viewPrefs.fit ? `화면 너비${actual ? ` · ${actual} px` : ''}` : `${viewPrefs.width} px${actual && actual<viewPrefs.width ? ` (표시 ${actual} px)` : ''}`;
+  $('previewWidthValue').textContent=viewPrefs.fit ? T('화면 너비')+(actual ? ` · ${actual} px` : '') : T('{n} px',{n:viewPrefs.width})+(actual && actual<viewPrefs.width ? ` (${T('표시 {n} px',{n:actual})})` : '');
 }
 function applyView(){
-  document.querySelector('.shell').classList.toggle('setup-collapsed',!viewPrefs.setupOpen);
+  document.querySelector('main').classList.toggle('setup-collapsed',!viewPrefs.setupOpen);
   $('setupBody').hidden=!viewPrefs.setupOpen;
   $('toggleSetup').setAttribute('aria-expanded',viewPrefs.setupOpen);
-  $('toggleSetup').querySelector('span').textContent=viewPrefs.setupOpen?'설정 접기':'설정 펼치기';
+  $('toggleSetup').title=T(viewPrefs.setupOpen?'설정 접기':'설정 펼치기');
+  $('toggleSetup').classList.toggle('flip',!viewPrefs.setupOpen);
   $('editorPane').hidden=!viewPrefs.editorOpen;
   $('toggleEditor').setAttribute('aria-expanded',viewPrefs.editorOpen);
-  $('toggleEditor').textContent=viewPrefs.editorOpen?'편집창 접기':'편집창 펼치기';
+  $('toggleEditor').title=T(viewPrefs.editorOpen?'편집창 접기':'편집창 펼치기');
+  $('toggleEditor').classList.toggle('flip',!viewPrefs.editorOpen);
   document.querySelector('.editing').classList.toggle('editor-collapsed',!viewPrefs.editorOpen);
   viewPrefs.width=Math.max(320,Math.min(2000,Number(viewPrefs.width)||1200));
   $('previewWidth').value=viewPrefs.width;
@@ -49,30 +51,57 @@ function updateActivity(){
   $('activityCard').setAttribute('aria-busy',working);
   $('activitySpinner').hidden=!working;
   const labels={outline:'스토리 기획',storyboard:'컷 구성',generate:'이미지 생성',replan:'페이지 재기획',translate:'대사 번역'};
-  $('activityBadge').textContent=working ? (local?.label || labels[p.phase] || '작업 중') : ({error:'확인 필요',paused:'멈춤',ready:'기획 완료',complete:'생성 완료'}[doc?.status] || '준비');
-  $('status').textContent=local ? `${local.label} 중입니다.` : doc?.message || 'AI가 페이지와 컷을 구성하고, 인물의 위치까지 준비합니다.';
+  $('activityBadge').textContent=working ? (local?.label || T(labels[p.phase] || '작업 중')) : T({error:'확인 필요',paused:'멈춤',ready:'기획 완료',complete:'생성 완료'}[doc?.status] || '준비');
+  // ★안내 문구를 기본값으로 깔지 않는다 — 화면에 남는 줄은 지금 상태를 말하는 것뿐이다
+  $('status').textContent=local ? T('{label} 중입니다.',{label:local.label}) : msg(doc?.message);
   $('activityDetail').hidden=!working;
   const total=!local && p.total, completed=p.completed || 0;
   const g=doc?.generation, waiting=(doc?.gen_requests || []).length;
-  const side=doc?.status==='planning' && (g?.page!=null || waiting || doc.gen_follow) ? ` · ${g?.page!=null ? `${g.page+1}페이지 생성 중` : doc.gen_follow ? '기획되는 대로 생성' : '생성 대기'}${waiting ? ` (대기 ${waiting})` : ''}${doc.queue_state==='waiting'?' · NAI 큐 대기':''}` : '';
-  $('activityCount').textContent=(total ? `${completed} / ${total}페이지 완료${p.page!=null ? ` · 현재 ${p.page+1}페이지` : ''}${!side && doc.queue_state==='waiting'?' · NAI 큐 대기':''}` : '응답을 기다리고 있습니다')+side;
+  const side=doc?.status==='planning' && (g?.page!=null || waiting || doc.gen_follow) ? ` · ${g?.page!=null ? T('{n}페이지 생성 중',{n:g.page+1}) : doc.gen_follow ? T('기획되는 대로 생성') : T('생성 대기')}${waiting ? ` (${T('대기 {n}',{n:waiting})})` : ''}${doc.queue_state==='waiting'?' · '+T('NAI 큐 대기'):''}` : '';
+  $('activityCount').textContent=(total ? T('{done} / {total}페이지 완료',{done:completed,total})+`${p.page!=null ? ` · ${T('현재 {n}페이지',{n:p.page+1})}` : ''}${!side && doc.queue_state==='waiting'?' · '+T('NAI 큐 대기'):''}` : T('응답을 기다리고 있습니다'))+side;
   if(total){$('activityProgress').max=total;$('activityProgress').value=completed;}else{$('activityProgress').removeAttribute('value');}
   const seconds=Math.max(0,Math.floor(Date.now()/1000-(local?.started_at || p.started_at || doc?.updated || Date.now()/1000)));
-  $('elapsed').textContent=`${Math.floor(seconds/60)}분 ${String(seconds%60).padStart(2,'0')}초 경과`;
+  $('elapsed').textContent=T('{m}분 {s}초 경과',{m:Math.floor(seconds/60),s:String(seconds%60).padStart(2,'0')});
   $('referenceActivity').hidden=local?.target!=='styleImage';
   $('styleRefDrop').classList.toggle('is-working',local?.target==='styleImage');
   document.querySelectorAll('button.is-working').forEach(el=>el.classList.remove('is-working'));
   if(local?.target && $(local.target)?.tagName==='BUTTON')$(local.target).classList.add('is-working');
   document.querySelectorAll('[data-page]').forEach(el=>el.classList.toggle('is-working',working&&!local&&p.page===+el.dataset.page));
-  $('generationSummary').textContent=`CFG ${$('cfg').value} · ${$('steps').value}스텝`;
+  $('generationSummary').textContent=T('CFG {cfg} · {steps}스텝',{cfg:$('cfg').value,steps:$('steps').value});
   $('stop').disabled=requesting;
+}
+
+/* ★★**백엔드가 준 상태 글도 옮긴다.** 그 글은 한국어로 오고 `_data` 에 그대로 저장되므로,
+     본을 맞춰 화면에서 옮긴다. 아는 본이 없으면(오류 원문 등) 그대로 보여 준다. */
+const SERVER_MSGS=[
+  [/^(\d+)\/(\d+)페이지 컷과 위치 프롬프트 구성 중$/,'{n}/{total}페이지 컷과 위치 프롬프트 구성 중'],
+  [/^(\d+)\/(\d+)페이지 생성 중$/,'{n}/{total}페이지 생성 중'],
+  [/^(\d+)\/(\d+)페이지 대사 번역 중$/,'{n}/{total}페이지 대사 번역 중'],
+  [/^(\d+)페이지를 다시 기획했습니다\. 이전 콘티와 이미지는 보관되어 있습니다\.$/,'{n}페이지를 다시 기획했습니다. 이전 콘티와 이미지는 보관되어 있습니다.'],
+  [/^(\d+)페이지의 컷 수와 구성을 다시 기획합니다\.$/,'{n}페이지의 컷 수와 구성을 다시 기획합니다.'],
+  [/^(\d+)페이지를 지웠습니다\.$/,'{n}페이지를 지웠습니다.'],
+];
+/** 확인창 — **앱이 그린다** (`peropix.ask`).
+ *  ★`peropix.ask` 는 PeroPix 3.3.3 부터다. 그 앞 판에서는 브라우저 것으로 떨어진다 — 모양은
+ *    앱과 다르지만, 없다고 묻지 않고 지워 버리는 것보다 낫다. */
+function confirmAsk(o){
+  if(window.peropix?.ask)return peropix.ask(o);
+  return Promise.resolve(window.confirm(o.body ? `${o.title}
+
+${o.body}` : o.title));
+}
+
+function msg(text){
+  if(!text)return '';
+  for(const [re,key] of SERVER_MSGS){const m=re.exec(text);if(m)return T(key,{n:m[1],total:m[2]});}
+  return T(text);
 }
 
 async function api(path, method = 'GET', body) {
   const r = await fetch(new URL(path, base), {method, headers: {'Content-Type':'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
   const data = await r.json();
   if (!r.ok || data.error) {
-    const detail = data.detail || data.error || `요청 실패 (${r.status})`;
+    const detail = data.detail || data.error || T('요청 실패 ({status})',{status:r.status});
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
   }
   return data;
@@ -81,17 +110,17 @@ function error(e) { $('alert').hidden = false; $('alert').textContent = e.messag
 function clearError() { $('alert').hidden = true; }
 function renderLlm() {
   const data = config.llm;
-  const group = engine => data.providers.filter(p=>p.engine===engine).map(p=>`<option value="${esc(p.id)}" ${p.available?'':'disabled'}>${esc(p.label)}${p.engine==='cli'&&!p.available ? (p.installed?' (미지원)':' (설치 안됨)') : ''}</option>`).join('');
-  $('llmProvider').innerHTML = '<option value="">앱 API 설정 따르기</option><optgroup label="CLI">'+group('cli')+'</optgroup><optgroup label="API">'+group('api')+'</optgroup>';
+  const group = engine => data.providers.filter(p=>p.engine===engine).map(p=>`<option value="${esc(p.id)}" ${p.available?'':'disabled'}>${esc(p.label)}${p.engine==='cli'&&!p.available ? ` (${T(p.installed?'미지원':'설치 안됨')})` : ''}</option>`).join('');
+  $('llmProvider').innerHTML = `<option value="">${T('앱 API 설정 따르기')}</option><optgroup label="CLI">`+group('cli')+'</optgroup><optgroup label="API">'+group('api')+'</optgroup>';
   $('llmProvider').value = data.choice.provider;
   const selectedProvider = data.providers.find(p=>p.id===data.choice.provider);
   modelRows = modelsBy[data.choice.provider]?.models || [];
   renderModels(data.choice.provider ? data.choice.model : data.model || '');
   renderEffort(data.choice.effort);
   // 값은 위의 세 선택칸에 이미 보인다 — 여기는 저장된 것과 준비 상태만 한 줄로 적는다.
-  const effort = data.choice.effort || (selectedProvider?.engine==='cli' ? 'CLI 기본' : '모델 기본값');
-  $('llm').textContent = `${selectedProvider?.label || data.provider} · ${data.model || 'CLI 기본 모델'} · ${effort}`
-    + (data.ready ? '' : ' · 설정 필요');
+  const effort = data.choice.effort || T(selectedProvider?.engine==='cli' ? 'CLI 기본' : '모델 기본값');
+  $('llm').textContent = `${selectedProvider?.label || data.provider} · ${data.model || T('CLI 기본 모델')} · ${effort}`
+    + (data.ready ? '' : ' · '+T('설정 필요'));
   controls();
   if (selectedProvider && selectedProvider.engine!=='cli' && !modelsBy[selectedProvider.id]) void loadModels(selectedProvider.id);
 }
@@ -104,8 +133,8 @@ function renderModels(value) {
   const loading = !!provider && !cli && !modelsBy[provider.id];
   const options = [];
   if (value && !list.some(m=>m.id===value)) options.push(`<option value="${esc(value)}">${esc(value)}</option>`);
-  if (cli || !value) options.push(`<option value="">${cli ? 'CLI 기본 모델' : loading ? '불러오는 중' : list.length ? '모델을 고르세요' : (modelsBy[provider?.id]?.err ? '목록을 못 받았습니다' : '모델 없음')}</option>`);
-  for (const m of list) options.push(`<option value="${esc(m.id)}">${esc(m.id)}${m.new ? '  ·  새 모델' : ''}${m.in ? `  ·  $${esc(m.in)}/M` : ''}${m.vision ? '  ·  vision' : ''}</option>`);
+  if (cli || !value) options.push(`<option value="">${T(cli ? 'CLI 기본 모델' : loading ? '불러오는 중' : list.length ? '모델을 고르세요' : (modelsBy[provider?.id]?.err ? '목록을 못 받았습니다' : '모델 없음'))}</option>`);
+  for (const m of list) options.push(`<option value="${esc(m.id)}">${esc(m.id)}${m.new ? '  ·  '+T('새 모델') : ''}${m.in ? `  ·  $${esc(m.in)}/M` : ''}${m.vision ? '  ·  vision' : ''}</option>`);
   $('llmModel').innerHTML = options.join('');
   $('llmModel').value = value || '';
 }
@@ -120,9 +149,9 @@ function renderEffort(value) {
     $('llmEffort').value = levels.includes(value) ? value : (levels.includes('high') ? 'high' : levels[0] || '');
     return;
   }
-  const options = [`<option value="">모델 기본값${picked?.effortDefault ? `  ·  ${esc(picked.effortDefault)}` : ''}</option>`];
+  const options = [`<option value="">${T('모델 기본값')}${picked?.effortDefault ? `  ·  ${esc(picked.effortDefault)}` : ''}</option>`];
   for (const e of levels.filter(v=>v!=='none')) options.push(`<option value="${esc(e)}">${esc(e)}</option>`);
-  if (!picked?.reasoningLocked) options.push('<option value="none">끄기</option>');
+  if (!picked?.reasoningLocked) options.push(`<option value="none">${T('끄기')}</option>`);
   $('llmEffort').innerHTML = options.join('');
   $('llmEffort').value = [...$('llmEffort').options].some(o=>o.value===value) ? value : '';
 }
@@ -135,7 +164,7 @@ async function loadModels(provider, force) {
   try {
     const r = await fetch(new URL('llm/models?provider='+encodeURIComponent(provider), base));
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || data.error || `요청 실패 (${r.status})`);
+    if (!r.ok) throw new Error(data.detail || data.error || T('요청 실패 ({status})',{status:r.status}));
     entry = {models: data.models || [], err: data.error || ''};
   } catch (e) { entry = {models: [], err: e.message || String(e)}; }
   modelsBy[provider] = entry;
@@ -143,7 +172,7 @@ async function loadModels(provider, force) {
   modelRows = entry.models;
   renderModels($('llmModel').value);
   renderEffort($('llmEffort').value);
-  $('llm').textContent = entry.err ? `모델 목록: ${entry.err}` : `모델 ${entry.models.length}개를 불러왔습니다.`;
+  $('llm').textContent = entry.err ? T('모델 목록: {e}',{e:entry.err}) : T('모델 {n}개를 불러왔습니다.',{n:entry.models.length});
   controls();
 }
 async function saveLlm() {
@@ -164,7 +193,7 @@ function options() {
 }
 function putOptions(o) {
   referenceName=o.reference_name || '';
-  $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '';
+  $('styleRefName').textContent=referenceName ? T('참고 이미지: {name}',{name:referenceName}) : '';
   $('styleRefPreview').hidden=true;
   const values = {maxPanels:o.max_panels, layoutMode:o.layout_mode || 'free', direction:o.direction, dialogue:o.dialogue,
     style:o.reference_style ? 'custom' : (o.style || 'mono'), stylePrompt:o.style_prompt, model:o.model, width:o.width, height:o.height,
@@ -177,7 +206,6 @@ function draft() { try { localStorage.setItem('manga-maker-draft', JSON.stringif
 function markDirty() {
   if (!doc?.outline || busy()) return;
   dirty = true;
-  $('saved').textContent = '변경사항 저장 대기';
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => persist().catch(error), 900);
 }
@@ -192,16 +220,15 @@ async function persist() {
       doc.revision = result.revision;
       doc.options = result.options;
       doc.compiled = result.compiled;
-      $('saved').textContent = dirty ? '변경사항 저장 대기' : '저장됨';
       renderPrompts();
     }
-  }).catch(e => {dirty = true; $('saved').textContent = '저장 실패'; throw e;}).finally(() => {saving = null;});
+  }).catch(e => {dirty = true; throw e;}).finally(() => {saving = null;});
   await saving;
   if (dirty) await persist();
 }
 async function listProjects() {
   const result = await api('projects');
-  $('projects').innerHTML = '<option value="">새 만화</option>' + result.items.map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('');
+  $('projects').innerHTML = `<option value="">${T('새 만화')}</option>` + result.items.map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('');
   $('projects').value = doc?.id || '';
 }
 function adopt(p) {
@@ -230,14 +257,13 @@ function controls() {
   $('projects').disabled = requesting;
   $('stop').hidden = !b || requesting;
   $('export').disabled = !doc || requesting;
-  $('save').disabled = b || !doc?.pages.length;
   const done = doc?.outline && doc.pages.length === doc.outline.pages.length;
   // While planning still runs, already storyboarded pages can be queued for generation.
   const planning = !!doc?.accepting && doc.status==='planning' && !requesting;
   const queued = doc?.gen_requests || [], generating = doc?.generation?.page;
   $('generatePage').disabled = planning ? (!doc.pages[selected] || queued.includes(selected) || generating===selected) : (b || !doc?.pages.length || !done);
   $('generateAll').disabled = planning ? !!doc.gen_follow : (b || !doc?.pages.length || !done || doc.pages.every(p => p.images.length));
-  $('generateAll').textContent = planning ? (doc.gen_follow ? '기획되는 대로 생성 중' : '기획되는 대로 생성') : `남은 ${doc?.pages.filter(p => !p.images.length).length || 0}페이지 생성`;
+  $('generateAll').textContent = planning ? T(doc.gen_follow ? '기획되는 대로 생성 중' : '기획되는 대로 생성') : T('남은 {n}페이지 생성',{n:doc?.pages.filter(p => !p.images.length).length || 0});
   // 40페이지가 차면 더 이어서 그릴 수 없다 (서버 상한과 같은 값).
   if (doc?.outline && doc.outline.pages.length >= 40) for (const id of ['plan','automatic']) $(id).disabled = true;
   for (const input of document.querySelectorAll('.editor input,.editor textarea,.editor select,.editor button')) input.disabled = b;
@@ -246,10 +272,9 @@ function controls() {
   updateActivity();
 }
 function render() {
-  $('projectTitle').textContent = doc?.outline?.title || (doc ? '새 이야기 기획 중' : '이야기를 들려주세요');
-  $('status').textContent = doc?.message || 'AI가 페이지와 컷을 구성하고, 인물의 위치까지 준비합니다.';
+  $('projectTitle').textContent = doc?.outline?.title || (doc ? T('새 이야기 기획 중') : T('새 만화'));
   const queuedPages=doc?.gen_requests || [], generatingPage=doc?.generation?.page;
-  $('pageNav').innerHTML = (doc?.pages || []).map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${p.plan.panels.length}컷 · ${p.error ? '확인 필요' : generatingPage===i ? '생성 중' : queuedPages.includes(i) ? '생성 대기' : p.images.length ? `생성 ${p.images.length}장` : '기획 완료'}</small></span></button>`).join('');
+  $('pageNav').innerHTML = (doc?.pages || []).map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${T('{n}컷',{n:p.plan.panels.length})} · ${p.error ? T('확인 필요') : generatingPage===i ? T('생성 중') : queuedPages.includes(i) ? T('생성 대기') : p.images.length ? T('생성 {n}장',{n:p.images.length}) : T('기획 완료')}</small></span></button>`).join('');
   const has = !!doc?.pages.length;
   $('empty').hidden = has; $('content').hidden = !has;
   if (has) { renderEditor(); renderBible(); renderBoard(); renderResult(); renderPrompts(); }
@@ -261,7 +286,6 @@ function setMode(value) {
   $('board').hidden = mode !== 'board'; $('result').hidden = mode !== 'image';
   document.querySelector('.editing').classList.toggle('image-view',mode==='image');
   applyView();
-  $('stageHint').textContent = mode === 'board' ? '점을 끌어 인물의 위치를 조정하세요. 숫자는 읽는 순서입니다.' : '이전 생성도 모두 보관됩니다. 이미지를 누르면 원본을 엽니다.';
 }
 const textarea = (attrs, value, rows=3) => `<textarea ${attrs} rows="${rows}">${esc(value)}</textarea>`;
 function renderEditor() {
@@ -270,39 +294,39 @@ function renderEditor() {
   const free = p.layout === 'free';
   const trash = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/></svg>';
   $('pageEditor').innerHTML =
-    `<div class="ed-row"><label class="ed-label">페이지</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${layoutNames[name]}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="이 페이지 삭제" aria-label="이 페이지 삭제">${trash}</button></div>`
-    + `<div class="ed-row"><label class="ed-label">재기획</label><input id="replanInstructions" maxlength="4000" placeholder="이 페이지를 어떻게 고칠지 (비우면 현재 설정으로)" value="${esc(replanDirections.get(`${doc.id}:${selected}`) || '')}"><button id="replanPage">다시 기획</button></div>`
-    + `<div class="ed-row"><label class="ed-label">장면 태그</label><input data-page-field="setting" value="${esc(p.setting || '')}" placeholder="장소, 시간, 조명 태그"></div>`
+    `<div class="ed-row"><label class="ed-label">${T('페이지')}</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${T(layoutNames[name])}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${trash}</button></div>`
+    + `<div class="ed-row"><label class="ed-label">${T('재기획')}</label><input id="replanInstructions" maxlength="4000" placeholder="${T('이 페이지를 어떻게 고칠지 (비우면 현재 설정으로)')}" value="${esc(replanDirections.get(`${doc.id}:${selected}`) || '')}"><button id="replanPage">${T('다시 기획')}</button></div>`
+    + `<div class="ed-row"><label class="ed-label">${T('장면 태그')}</label><input data-page-field="setting" value="${esc(p.setting || '')}" placeholder="${T('장소, 시간, 조명 태그')}"></div>`
     + (pg.error ? `<p class="page-error">${esc(pg.error)}</p>` : '')
     + p.panels.map((panel,i) => {
       const r = panel.region, open = regionOpen.has(`${doc.id}:${selected}:${i}`);
       const head = free && r
-        ? `<span class="cut-frame">${frameNames[r.frame]}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${open}">영역</button>`
+        ? `<span class="cut-frame">${T(frameNames[r.frame])}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${open}">${T('영역')}</button>`
         : '<span class="cut-box"></span>';
-      return `<article class="panel-card" data-panel="${i}"><div class="cut-head"><span class="chip">${i+1}번 컷</span>${head}</div>`
+      return `<article class="panel-card" data-panel="${i}"><div class="cut-head"><span class="chip">${T('{n}번 컷',{n:i+1})}</span>${head}</div>`
         + (free && r && open ? regionEditor(r) : '')
-        + `<div class="ed-row"><label class="ed-label">장면 요약</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
-        + `<div class="ed-row"><label class="ed-label">컷 태그</label>${textarea('data-panel-field="scene" placeholder="이 컷에만 있는 장면 태그"',panel.scene || '',2)}</div>`
+        + `<div class="ed-row"><label class="ed-label">${T('장면 요약')}</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
+        + `<div class="ed-row"><label class="ed-label">${T('컷 태그')}</label>${textarea(`data-panel-field="scene" placeholder="${T('이 컷에만 있는 장면 태그')}"`,panel.scene || '',2)}</div>`
         + panel.subjects.map((s,j) => `<div class="subject" data-subject="${j}">`
             + `<div class="cast-line"><span class="chip">${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</span></div>`
-            + `<div class="ed-row"><label class="ed-label">카메라</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
-            + `<div class="ed-row"><label class="ed-label">동작·표정</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
-            + `<div class="ed-row"><label class="ed-label">컷 안 위치</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">가로 · 세로</span></div></div>`).join('')
+            + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
+            + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
+            + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div></div>`).join('')
         + (options().dialogue !== 'none'
-            ? `<div class="cast-line"><span class="ed-note">대사</span></div>`
-              + panel.dialogue.map((d,j) => `<div class="dialogue-row" data-line="${j}"><select data-line-field="speaker" aria-label="화자"><option value="">내레이션</option>${panel.subjects.map(s=>`<option value="${esc(s.character)}" ${d.speaker===s.character?'selected':''}>${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</option>`).join('')}</select>${textarea('data-line-field="text" aria-label="대사"',d.text,2)}<button data-remove-line="${j}" class="icon-btn" aria-label="대사 삭제"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div>`).join('')
-              + `<button class="subtle" data-add-line="${i}" ${panel.dialogue.length>=3?'disabled':''}>대사 추가</button>`
+            ? `<div class="cast-line"><span class="ed-note">${T('대사')}</span></div>`
+              + panel.dialogue.map((d,j) => `<div class="dialogue-row" data-line="${j}"><select data-line-field="speaker" aria-label="화자"><option value="">${T('내레이션')}</option>${panel.subjects.map(s=>`<option value="${esc(s.character)}" ${d.speaker===s.character?'selected':''}>${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</option>`).join('')}</select>${textarea('data-line-field="text" aria-label="대사"',d.text,2)}<button data-remove-line="${j}" class="icon-btn" aria-label="대사 삭제"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div>`).join('')
+              + `<button class="ghost" data-add-line="${i}" ${panel.dialogue.length>=3?'disabled':''}>${T('대사 추가')}</button>`
             : '')
         + '</article>';
     }).join('');
 }
 function regionEditor(r) {
   const cell = (key,label) => `<label>${label}<input data-region-field="${key}" type="number" min="${key==='w'||key==='h' ? '.05':'0'}" max="1" step=".01" value="${r[key]}"></label>`;
-  return `<div class="region-grid">${cell('x','페이지 가로')}${cell('y','페이지 세로')}${cell('w','너비')}${cell('h','높이')}</div>`
-    + `<div class="ed-row"><label class="ed-label">컷 테두리</label><select data-region-field="frame">${Object.entries(frameNames).map(([key,label])=>`<option value="${key}" ${r.frame===key?'selected':''}>${label}</option>`).join('')}</select></div>`;
+  return `<div class="region-grid">${cell('x',T('페이지 가로'))}${cell('y',T('페이지 세로'))}${cell('w',T('너비'))}${cell('h',T('높이'))}</div>`
+    + `<div class="ed-row"><label class="ed-label">${T('컷 테두리')}</label><select data-region-field="frame">${Object.entries(frameNames).map(([key,label])=>`<option value="${key}" ${r.frame===key?'selected':''}>${T(label)}</option>`).join('')}</select></div>`;
 }
 function renderBible() {
-  $('characters').innerHTML = doc.outline.characters.map((c,i)=>`<div class="bible-char" data-character="${i}"><strong>${esc(c.name)}</strong><label>모든 컷에 공유할 외형·의상${textarea('data-char-field="prompt"',c.prompt,4)}</label><label>캐릭터 네거티브${textarea('data-char-field="uc"',c.uc,2)}</label></div>`).join('');
+  $('characters').innerHTML = doc.outline.characters.map((c,i)=>`<div class="bible-char" data-character="${i}"><strong>${esc(c.name)}</strong><label>${T('모든 컷에 공유할 외형·의상')}${textarea('data-char-field="prompt"',c.prompt,4)}</label><label>${T('캐릭터 네거티브')}${textarea('data-char-field="uc"',c.uc,2)}</label></div>`).join('');
 }
 function boxes() {
   const pg=doc.pages[selected].plan;
@@ -335,15 +359,15 @@ function imageUrl(image) { return new URL('api/file/'+encodeURIComponent(image.w
 function renderResult(version) {
   if (!doc?.pages.length) return;
   const images = doc.pages[selected].images;
-  if (!images.length) { $('result').innerHTML = '<p class="hint">아직 생성된 이미지가 없습니다. 기획을 확인하고 이 페이지를 생성해 주세요.</p>'; return; }
+  if (!images.length) { $('result').innerHTML = `<p class="hint">${T('아직 생성된 이미지가 없습니다.')}</p>`; return; }
   const at = version ?? images.length-1, image = images[at], url = imageUrl(image);
-  $('result').innerHTML = `<select id="version" aria-label="생성 버전">${images.map((im,i)=>`<option value="${i}" ${i===at?'selected':''}>생성 ${i+1} · 시드 ${esc(im.seed)}</option>`).join('')}</select><a href="${esc(url)}" target="_blank" rel="noreferrer"><img src="${esc(url)}" alt="${selected+1}페이지 생성 결과"></a><p class="hint">${esc(image.file)}</p>`;
+  $('result').innerHTML = `<select id="version" aria-label="생성 버전">${images.map((im,i)=>`<option value="${i}" ${i===at?'selected':''}>${T('생성 {n} · 시드 {seed}',{n:i+1,seed:esc(im.seed)})}</option>`).join('')}</select><a href="${esc(url)}" target="_blank" rel="noreferrer"><img src="${esc(url)}" alt="${selected+1}페이지 생성 결과"></a><p class="hint">${esc(image.file)}</p>`;
   $('version').onchange = e => renderResult(+e.target.value);
 }
 function renderPrompts() {
   const p = doc?.compiled?.[selected];
   if (!p) return;
-  $('prompts').innerHTML = `<p class="hint">베이스 프롬프트</p><pre>${esc(p.prompt)}</pre><p class="hint">네거티브 프롬프트</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>`<p class="hint">위치 프롬프트 ${i+1} (${c.center.x}, ${c.center.y})</p><pre>${esc(c.prompt)}</pre>`).join('');
+  $('prompts').innerHTML = `<p class="hint">${T('베이스 프롬프트')}</p><pre>${esc(p.prompt)}</pre><p class="hint">${T('네거티브 프롬프트')}</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>`<p class="hint">${T('위치 프롬프트 {n} ({x}, {y})',{n:i+1,x:c.center.x,y:c.center.y})}</p><pre>${esc(c.prompt)}</pre>`).join('');
 }
 
 document.querySelector('.editor').addEventListener('input', e => {
@@ -384,8 +408,13 @@ document.querySelector('.editor').addEventListener('click', e => {
     return;
   }
   if(e.target.closest('#deletePage')) {
-    if(busy() || !confirm(`${selected+1}페이지를 지울까요? 콘티와 이미지 목록이 지워지고, 생성된 파일은 워크스페이스에 남습니다.`)) return;
-    perform(async()=>{const next=await api(`projects/${doc.id}/pages/${selected}/delete`,'POST',{revision:doc.revision});selected=Math.max(0,selected-1);adopt(next);},'페이지 삭제','deletePage');
+    if(busy()) return;
+    const page=selected;
+    // ★확인은 **앱이 그린다** (`peropix.ask`) — 브라우저 `confirm` 은 앱 밖 OS 대화상자라 쓰지 않는다
+    void (async()=>{
+      if(!await confirmAsk({title:T('{n}페이지를 지울까요?',{n:page+1}),body:T('콘티와 이미지 목록이 지워지고, 생성된 파일은 워크스페이스에 남습니다.'),ok:T('삭제'),danger:true}))return;
+      perform(async()=>{const next=await api(`projects/${doc.id}/pages/${page}/delete`,'POST',{revision:doc.revision});selected=Math.max(0,page-1);adopt(next);},'페이지 삭제','deletePage');
+    })();
     return;
   }
   const region=e.target.closest('[data-region-toggle]');
@@ -424,18 +453,18 @@ $('board').addEventListener('pointerdown', e => {
 });
 $('pageNav').onclick = async e => { const tab=e.target.closest('[data-page]');if (!tab)return;try{await persist();selected=+tab.dataset.page;render();}catch(e){error(e);} };
 $('boardMode').onclick=()=>setMode('board');$('imageMode').onclick=()=>setMode('image');
-$('save').onclick=()=>persist().then(()=>{clearError();render();}).catch(error);
 for (const id of optionIds) $(id).addEventListener('change',()=>{
   if(id==='size' && $('size').value!=='custom'){const [w,h]=$('size').value.split(',');$('width').value=w;$('height').value=h;}
   if(id==='width'||id==='height')syncSize();
   draft();markDirty();if(id==='dialogue'&&doc?.pages.length)renderEditor();renderBoard();controls();
 });
 $('story').addEventListener('input',draft);
-$('example').onclick=()=>{$('story').value='키타가와 마린이 고죠네 집에 놀러 갔다. 고죠가 소파에서 자고 있길래 몰래 다가가 볼을 콕 찌른다. 가까이서 얼굴을 보다가 두근거려 당황하는 순간 고죠가 눈을 뜨고, 둘 다 얼굴이 빨개진다. 귀엽고 설레는 일상 로맨스.';draft();};
+$('example').onclick=()=>{$('story').value=T('키타가와 마린이 고죠네 집에 놀러 갔다. 고죠가 소파에서 자고 있길래 몰래 다가가 볼을 콕 찌른다. 가까이서 얼굴을 보다가 두근거려 당황하는 순간 고죠가 눈을 뜨고, 둘 다 얼굴이 빨개진다. 귀엽고 설레는 일상 로맨스.');draft();};
 async function perform(fn,label='요청 처리',target='') {
   if (requesting) return;
   requesting=true;
-  activeOperation={label,target,started_at:Date.now()/1000};
+  // ★부르는 쪽은 한국어 이름을 그대로 넘긴다 — 옮기는 것은 여기 한 자리다
+  activeOperation={label:T(label),target,started_at:Date.now()/1000};
   clearError();
   try {controls();await persist();await fn();}
   catch(e){error(e);}
@@ -447,9 +476,9 @@ async function perform(fn,label='요청 처리',target='') {
 async function start(automatic) {
   await perform(async()=>{
     const text=$('story').value.trim(), pages=+$('pageCount').value;
-    if (!doc && !text) throw new Error('무엇을 그릴지 적어 주세요.');
+    if (!doc && !text) throw new Error(T('무엇을 그릴지 적어 주세요.'));
     await saveLlm();
-    if (!config.llm.ready) throw new Error('선택한 CLI의 설치 상태 또는 API 공급자의 키 설정을 확인해 주세요.');
+    if (!config.llm.ready) throw new Error(T('선택한 CLI의 설치 상태 또는 API 공급자의 키 설정을 확인해 주세요.'));
     if (!doc) {
       selected=0;mode='board';
       adopt(await api('projects','POST',{story:text,options:{...options(),pages},automatic}));
@@ -471,15 +500,21 @@ $('new').onclick=()=>perform(async()=>{doc=null;selected=0;dirty=false;try{local
 $('projects').onchange=()=>perform(async()=>{const id=$('projects').value;if(id){selected=0;adopt(await api(`projects/${id}`));}else{doc=null;selected=0;$('story').value='';try{localStorage.removeItem('manga-maker-current');}catch{}render();}});
 $('export').onclick=()=>perform(async()=>{
   const response=await fetch(new URL(`projects/${doc.id}/export`,base));
-  if(!response.ok)throw new Error('ZIP을 저장하지 못했습니다.');
+  if(!response.ok)throw new Error(T('ZIP을 저장하지 못했습니다.'));
   const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');
-  a.href=url;a.download=`만화-${doc.outline?.title || doc.id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+  a.href=url;a.download=`${T('만화')}-${doc.outline?.title || doc.id}.zip`;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
 });
 
 async function init() {
+  /* ★★앱 언어를 따라간다 (카메라 구도·태그 굴리기와 같은 방식). 앱 설정에서 바꾸면 `onLocale`
+       로 알림이 와서 정적 문구와 지금 그린 것을 함께 다시 채운다. */
+  if (window.peropix?.inApp) {
+    try { setMangaLang(await peropix.locale()); } catch {}
+    peropix.onLocale(l=>{ setMangaLang(l); if(config)render(); if(config)renderLlm(); renderStyles(); });
+  }
   config=await api('config');
   $('negativePrompt').value=config.default_negative;
-  $('workspace').innerHTML='<option value="">워크스페이스 선택</option>'+config.workspaces.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
+  $('workspace').innerHTML=`<option value="">${T('워크스페이스 선택')}</option>`+config.workspaces.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');
   $('account').innerHTML=config.accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
   renderLlm();
   try {
@@ -506,7 +541,7 @@ $('llmProvider').onchange=()=>{
   modelRows=modelsBy[provider]?.models || [];
   renderModels(p?.model || '');
   renderEffort('');
-  $('llm').textContent='모델을 고르면 저장됩니다.';
+  $('llm').textContent=T('모델을 고르면 저장됩니다.');
   controls();
   if(p && p.engine!=='cli' && !modelsBy[provider]) void loadModels(provider);
 };
@@ -529,11 +564,11 @@ const styleIcons={
 };
 function renderStyles(){
   const current=savedStyles.find(s=>s.id===selectedStyle);
-  $('stylePickerLabel').textContent=current?.name || (savedStyles.length?'저장된 화풍 선택':'저장된 화풍 없음');
+  $('stylePickerLabel').textContent=current?.name || T(savedStyles.length?'저장된 화풍 선택':'저장된 화풍 없음');
   $('styleList').innerHTML = savedStyles.length ? savedStyles.map(s=>s.id===renamingStyle
-    ? `<div class="style-row" data-style="${esc(s.id)}"><input class="style-rename-input" maxlength="120" aria-label="화풍 이름" value="${esc(s.name)}"><button class="icon-btn" data-rename-ok="${esc(s.id)}" aria-label="이름 저장" title="이름 저장">${styleIcons.check}</button><button class="icon-btn" data-rename-cancel="1" aria-label="이름 변경 취소" title="취소">${styleIcons.cross}</button></div>`
-    : `<div class="style-row" data-style="${esc(s.id)}"><button class="style-pick" role="option" aria-selected="${s.id===selectedStyle}" data-pick="${esc(s.id)}">${esc(s.name)}</button><button class="icon-btn" data-rename="${esc(s.id)}" aria-label="이름 변경" title="이름 변경">${styleIcons.pencil}</button><button class="icon-btn" data-delete="${esc(s.id)}" aria-label="삭제" title="삭제">${styleIcons.trash}</button></div>`).join('')
-    : '<p class="style-empty">저장된 화풍이 없습니다.</p>';
+    ? `<div class="style-row" data-style="${esc(s.id)}"><input class="style-rename-input" maxlength="120" aria-label="화풍 이름" value="${esc(s.name)}"><button class="icon-btn" data-rename-ok="${esc(s.id)}" aria-label="${T('저장')}" title="${T('저장')}">${styleIcons.check}</button><button class="icon-btn" data-rename-cancel="1" aria-label="${T('취소')}" title="${T('취소')}">${styleIcons.cross}</button></div>`
+    : `<div class="style-row" data-style="${esc(s.id)}"><button class="style-pick" role="option" aria-selected="${s.id===selectedStyle}" data-pick="${esc(s.id)}">${esc(s.name)}</button><button class="icon-btn" data-rename="${esc(s.id)}" aria-label="${T('이름 변경')}" title="${T('이름 변경')}">${styleIcons.pencil}</button><button class="icon-btn" data-delete="${esc(s.id)}" aria-label="${T('삭제')}" title="${T('삭제')}">${styleIcons.trash}</button></div>`).join('')
+    : `<p class="style-empty">${T('저장된 화풍이 없습니다.')}</p>`;
   controls();
 }
 function openStyleList(open){
@@ -560,11 +595,11 @@ async function applyStyleData(data){
   $('negativePrompt').value=data.negative_prompt;
   for(const [key,value] of Object.entries(data.generation_options || {}))if(generationFields[key])$(generationFields[key]).value=value;
   syncSize();
-  const imported=Object.entries(data.generation_options || {}).filter(([key])=>generationFields[key]).map(([key,value])=>`${generationLabels[key]} ${value}`);
+  const imported=Object.entries(data.generation_options || {}).filter(([key])=>generationFields[key]).map(([key,value])=>`${T(generationLabels[key])} ${value}`);
   $('importedOptions').hidden=false;
-  $('importedOptions').textContent=(imported.length ? `가져옴: ${imported.join(' · ')}. 기록되지 않은 값은 유지됩니다.` : '기록된 생성 옵션이 없어 현재 설정을 유지합니다.') + (data.skipped_options?.length ? ` 적용할 수 없는 값: ${data.skipped_options.map(k=>generationLabels[k] || k).join(', ')}.` : '');
+  $('importedOptions').textContent=(imported.length ? T('가져옴: {list}',{list:imported.join(' · ')}) : T('기록된 생성 옵션이 없어 현재 설정을 유지합니다.')) + (data.skipped_options?.length ? ' · '+T('적용할 수 없는 값: {list}',{list:data.skipped_options.map(k=>T(generationLabels[k] || k)).join(', ')}) : '');
   referenceName=data.reference_name || '';
-  $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '';
+  $('styleRefName').textContent=referenceName ? T('참고 이미지: {name}',{name:referenceName}) : '';
   $('styleRefPreview').hidden=true;
   if(referencePreviewUrl){URL.revokeObjectURL(referencePreviewUrl);referencePreviewUrl='';}
   draft();if(doc?.outline){dirty=true;await persist();renderBoard();}
@@ -587,36 +622,54 @@ $('styleList').addEventListener('click',e=>{
   if(pick)perform(async()=>{
     const item=await api(`styles/${pick.dataset.pick}`);
     rememberStyle(item);openStyleList(false);await applyStyleData(item);
-    $('styleLibraryStatus').textContent=`「${item.name}」 적용됨`;
+    $('styleLibraryStatus').textContent=T('「{name}」 적용됨',{name:item.name});
   },'저장된 화풍 적용','stylePicker');
   else if(rename){renamingStyle=rename.dataset.rename;renderStyles();$('styleList').querySelector('.style-rename-input')?.focus();}
   else if(cancel){renamingStyle='';renderStyles();}
   else if(ok)perform(async()=>{
     const name=($('styleList').querySelector('.style-rename-input')?.value || '').trim();
-    if(!name)throw new Error('화풍 이름을 입력해 주세요.');
+    if(!name)throw new Error(T('화풍 이름을 입력해 주세요.'));
     const item=await api(`styles/${ok.dataset.renameOk}`,'PATCH',{name});
-    rememberStyle(item);$('styleLibraryStatus').textContent=`「${item.name}」 이름 변경됨`;
+    rememberStyle(item);$('styleLibraryStatus').textContent=T('「{name}」 이름 변경됨',{name:item.name});
   },'화풍 이름 변경','stylePicker');
   else if(remove){
     const id=remove.dataset.delete, name=savedStyles.find(s=>s.id===id)?.name || '';
-    if(!confirm(`「${name}」 화풍을 지울까요? 이미 적용된 설정과 프로젝트는 그대로 남습니다.`))return;
-    perform(async()=>{
-      await api(`styles/${id}`,'DELETE');
-      if(selectedStyle===id)selectedStyle='';
-      await listStyles();
-      $('styleLibraryStatus').textContent=`「${name}」 삭제됨. 현재 적용된 설정과 프로젝트는 유지됩니다.`;
-    },'화풍 삭제','stylePicker');
+    void (async()=>{
+      if(!await confirmAsk({title:T('「{name}」 화풍을 지울까요?',{name}),body:T('이미 적용된 설정과 프로젝트는 그대로 남습니다.'),ok:T('삭제'),danger:true}))return;
+      perform(async()=>{
+        await api(`styles/${id}`,'DELETE');
+        if(selectedStyle===id)selectedStyle='';
+        await listStyles();
+        $('styleLibraryStatus').textContent=T('「{name}」 삭제됨',{name});
+      },'화풍 삭제','stylePicker');
+    })();
   }
 });
-$('refreshStyles').onclick=()=>perform(async()=>{await listStyles();$('styleLibraryStatus').textContent=`저장된 화풍 ${savedStyles.length}개`;} ,'화풍 목록 불러오기','refreshStyles');
-$('saveStyle').onclick=()=>perform(async()=>{
-  const o=options();
-  const suggested=referenceName ? referenceName.replace(/\.[^.]+$/,'') : `화풍 ${savedStyles.length+1}`;
-  const name=(window.prompt('새 화풍의 이름', suggested) || '').trim();
-  if(!name)return;
+$('refreshStyles').onclick=()=>perform(async()=>{await listStyles();$('styleLibraryStatus').textContent=T('저장된 화풍 {n}개',{n:savedStyles.length});} ,'화풍 목록 불러오기','refreshStyles');
+/* ★이름은 **제자리 입력칸**으로 받는다 (사용자 결정 2026-09-20). `window.prompt` 는 앱 밖
+     OS 대화상자라 앱의 글꼴·테마·언어와 따로 놀고, 목록 안의 이름 변경과도 모양이 달랐다. */
+function openStyleName(open){
+  $('styleNameRow').hidden=!open;
+  $('saveStyle').hidden=open;
+  if(open){
+    $('styleName').value=referenceName ? referenceName.replace(/\.[^.]+$/,'') : T('화풍 {n}',{n:savedStyles.length+1});
+    $('styleName').focus();$('styleName').select();
+  }
+}
+$('styleNameOk').innerHTML=styleIcons.check;$('styleNameCancel').innerHTML=styleIcons.cross;
+$('saveStyle').onclick=()=>{if(!busy())openStyleName(true);};
+$('styleNameCancel').onclick=()=>openStyleName(false);
+$('styleName').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();$('styleNameOk').click();}
+  if(e.key==='Escape'){e.stopPropagation();openStyleName(false);}
+});
+$('styleNameOk').onclick=()=>perform(async()=>{
+  const o=options(), name=$('styleName').value.trim();
+  if(!name)throw new Error(T('화풍 이름을 입력해 주세요.'));
   const item=await api('styles','POST',{name,style_prompt:o.style_prompt,negative_prompt:o.negative_prompt,reference_name:referenceName,
     generation_options:Object.fromEntries(Object.keys(generationFields).map(key=>[key,o[key]]))});
-  rememberStyle(item);$('styleLibraryStatus').textContent=`「${item.name}」 새 화풍으로 저장됨`;
+  openStyleName(false);
+  rememberStyle(item);$('styleLibraryStatus').textContent=T('「{name}」 새 화풍으로 저장됨',{name:item.name});
 },'화풍 저장','saveStyle');
 for(const event of ['input','change'])$('stylePrompt').addEventListener(event,()=>{
   if($('stylePrompt').value.trim()&&$('style').value!=='custom')$('style').value='custom';   // 적는 순간 내 화풍으로
@@ -626,21 +679,21 @@ async function importStyle(file) {
   if(!file || busy())return;
   await perform(async()=>{
     await saveLlm();
-    $('styleRefName').textContent='원본 프롬프트에서 화풍 추출 중…';
+    $('styleRefName').textContent=T('원본 프롬프트에서 화풍 추출 중…');
     const body=new FormData();body.append('file',file);
     try {
       const response=await fetch(new URL('style-reference',base),{method:'POST',body});
       const data=await response.json();
-      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'참고 이미지 화풍 추출에 실패했습니다.');
+      if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:T('참고 이미지 화풍 추출에 실패했습니다.'));
       rememberStyle(data);
-      $('styleLibraryStatus').textContent=`「${data.name}」 추출 후 자동 저장됨`;
+      $('styleLibraryStatus').textContent=T('「{name}」 추출 후 자동 저장됨',{name:data.name});
       await applyStyleData(data);
       if(URL.createObjectURL){
         referencePreviewUrl=URL.createObjectURL(file);
         $('styleRefPreview').src=referencePreviewUrl;$('styleRefPreview').hidden=false;
       }
     } finally {
-      $('styleRefName').textContent=referenceName ? `참고 이미지: ${referenceName}` : '참고 이미지 없음';
+      $('styleRefName').textContent=referenceName ? T('참고 이미지: {name}',{name:referenceName}) : T('참고 이미지 없음');
       $('styleImage').value='';
     }
   },'참고 이미지 가져오기','styleImage');

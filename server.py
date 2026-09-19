@@ -256,7 +256,7 @@ async def recover(p: dict):
             p["pages"][pending["page"]]["error"] = "앱이 종료되어 생성 완료를 확인하지 못했습니다. 저장 폴더를 확인한 뒤 재생성을 눌러 주세요."
     p["status"] = "paused"
     p.pop("checkpoint", None)
-    p["message"] = "중단된 작업을 복원했습니다. 이어서 진행할 수 있습니다."
+    p["message"] = "중단된 작업을 복원했습니다."
     save(p)
 
 
@@ -396,7 +396,7 @@ async def plan_work(pid: str, automatic: bool):
             save(p)
             await servicer
         p["status"] = "complete" if all(x["images"] for x in p["pages"]) else "ready"
-        p["message"] = "요청한 페이지를 모두 생성했습니다." if p["status"] == "complete" else "기획이 준비되었습니다. 컷과 대사를 수정하거나 생성할 수 있습니다."
+        p["message"] = "요청한 페이지를 모두 생성했습니다." if p["status"] == "complete" else "기획이 준비되었습니다."
         save(p)
         if automatic:
             checkpoint(p)
@@ -975,7 +975,7 @@ async def delete_page(pid: str, index: int, body: DeletePage):
         p["status"] = "paused"
     else:
         p["status"] = "complete" if p["pages"] and all(x["images"] for x in p["pages"]) else "ready"
-    p["message"] = f"{index+1}페이지를 지웠습니다. 이어서 그리기로 그 자리부터 새로 만들 수 있습니다."
+    p["message"] = f"{index+1}페이지를 지웠습니다."
     p.pop("checkpoint", None)
     save(p)
     return view(p)

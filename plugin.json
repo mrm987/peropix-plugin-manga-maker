@@ -5,7 +5,7 @@
     "en": "Manga Maker",
     "ja": "マンガ制作"
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": {
     "ko": "짧은 줄거리를 LLM 이 페이지와 컷으로 나누고, NAI V5 위치 프롬프트로 만화를 생성합니다.",
     "en": "An LLM splits a short story into pages and panels, then generates the manga with NAI V5 positioned prompts.",
@@ -15,8 +15,8 @@
   "server": "server.py",
   "web": "web",
   "canvas": {
-    "width": 1440,
-    "height": 900,
+    "width": 1080,
+    "height": 760,
     "minWidth": 680,
     "minHeight": 500
   },

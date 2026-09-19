@@ -5,8 +5,12 @@ import { JSDOM } from '../../../_tmp/manga-maker-test-tools/node_modules/jsdom/l
 
 const url='http://127.0.0.1:8779/k/qa/plug/manga-maker/web/';
 const html=await fs.readFile(new URL('../web/index.html',import.meta.url),'utf8');
+const i18n=await fs.readFile(new URL('../web/i18n.js',import.meta.url),'utf8');
 const script=(await fs.readFile(new URL('../web/app.js',import.meta.url),'utf8'))
   .replace('init().catch(error);','window.qaReady=init().catch(error);');
+/** 앱 창구 대역 — 확인창은 앱이 그리므로(`peropix.ask`) 여기서는 「확인」으로 답한다.
+ *  ★`inApp:false` 다: 언어·워크스페이스를 앱에 묻는 길은 이 시험에서 타지 않는다. */
+const hostStub = 'window.peropix={inApp:false,ask:async()=>true,toast(){},onLocale(){},state:async()=>({})};';
 const calls=[];
 let staleReferenceResponse=false;
 await fetch(new URL('../api/llm',url),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'',model:''})});
@@ -21,7 +25,7 @@ w.fetch=async (url,opts)=>{
   }
   return response;
 };
-w.eval(script+'\nwindow.qa = {get:()=>doc, persist, render, options};');
+w.eval(hostStub+i18n+script+'\nwindow.qa = {get:()=>doc, persist, render, options};');
 async function wait(test,label) {
   const deadline=Date.now()+15000;
   while(Date.now()<deadline){if(test())return;await new Promise(r=>setTimeout(r,50));}
@@ -136,8 +140,11 @@ try {
   assert.equal(w.qa.get().options.width,1024);assert.equal(w.qa.get().options.height,1536);
   assert.ok(!$('importedOptions').textContent.includes('1344'),'Ignore resolution even from an older server response');
   input($('cfg'),'0','change');input($('negativePrompt'),'','change');
-  w.prompt=()=>'수정한 화풍';
-  $('saveStyle').click();await wait(()=>$('styleLibraryStatus').textContent.includes('새 화풍으로 저장됨')&&!$('saveStyle').disabled,'save current settings as new style');
+  $('saveStyle').click();
+  assert.equal($('styleNameRow').hidden,false,'이름은 제자리 입력칸으로 받는다');
+  input($('styleName'),'수정한 화풍');
+  $('styleNameOk').click();await wait(()=>$('styleLibraryStatus').textContent.includes('새 화풍으로 저장됨')&&!$('saveStyle').disabled,'save current settings as new style');
+  assert.equal($('styleNameRow').hidden,true,'저장하면 입력칸이 닫힌다');
   const customStyleId=currentStyle();
   assert.notEqual(customStyleId,savedStyleId);
   const stored=await (await fetch(new URL(`../api/styles/${customStyleId}`,url))).json();
@@ -225,7 +232,7 @@ try {
   reload.window.fetch=fetch;
   reload.window.localStorage.setItem('manga-maker-current',pid);
   reload.window.localStorage.setItem('manga-maker-view',w.localStorage.getItem('manga-maker-view'));
-  reload.window.eval(script+'\nwindow.qa = {get:()=>doc};');
+  reload.window.eval(hostStub+i18n+script+'\nwindow.qa = {get:()=>doc};');
   await reload.window.qaReady;
   reload.window.document.getElementById('stylePicker').click();
   assert.ok([...reload.window.document.querySelectorAll('[data-pick]')].some(el=>el.dataset.pick===savedStyleId&&el.textContent==='부드러운 수채화 <내 화풍>'));
@@ -242,7 +249,7 @@ try {
   assert.equal(reload.window.document.getElementById('width').value,'1024');
   assert.equal(reload.window.document.getElementById('height').value,'1536');
   const beforeDelete=JSON.stringify(w.qa.options());
-  w.confirm=()=>true;   // 삭제는 되돌릴 수 없어 확인을 거친다
+  // 삭제는 되돌릴 수 없어 확인을 거친다 — 확인창은 앱이 그린다 (`peropix.ask`, 위의 대역이 「확인」으로 답한다)
   styleRow(customStyleId,'delete').click();
   await wait(()=>$('styleLibraryStatus').textContent.includes('삭제됨')&&!$('saveStyle').disabled,'delete saved style');
   openStyles();
@@ -254,7 +261,6 @@ try {
   assert.equal(reload.window.document.querySelector('[data-pane="generation"]').hidden,false,'선택한 탭이 기억된다');
   reload.window.close();
   // Deleting a page drops its plan and beat; the previous page becomes selected.
-  w.confirm=()=>true;
   const pagesBefore=w.qa.get().pages.length;assert.ok(pagesBefore>=2,'fixture project has pages to delete');
   w.document.querySelector('[data-page="1"]').click();
   $('deletePage').click();await wait(()=>w.qa.get().pages.length===pagesBefore-1,'delete page');
