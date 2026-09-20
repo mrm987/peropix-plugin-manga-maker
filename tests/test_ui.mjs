@@ -163,7 +163,11 @@ try {
   assert.ok(w.qa.get().compiled[0].prompt.includes('multiple views, comic, manga, dynamic angle'),'reference tag base');
   assert.ok(w.document.querySelector('[data-page-field="setting"]'),'page setting tags field');
   assert.ok(w.document.querySelector('[data-panel="0"] [data-subject-field="camera"]'),'camera tags field');
-  input(w.document.querySelector('[data-panel="0"] [data-subject-field="x"]'),'.8');
+  /* ★컷 안 위치는 콘티에서 끌어서만 정한다 (사용자 지시 2026-09-20) — 숫자칸이 없다.
+     끌기는 jsdom 에서 못 하므로 값만 옮기고, 편집창을 거쳐 저장 표시를 세운다. */
+  assert.equal(w.document.querySelector('[data-panel="0"] [data-subject-field="x"]'),null,'컷 안 위치 숫자칸이 없다');
+  w.qa.get().pages[0].plan.panels[0].subjects[0].x=.8;
+  input(w.document.querySelector('[data-panel="0"] [data-panel-field="summary"]'),w.qa.get().pages[0].plan.panels[0].summary);
   await w.qa.persist();
   assert.equal(w.qa.get().compiled[0].characters[0].center.x,.886);
   input($('direction'),'ltr','change');await w.qa.persist();
@@ -256,6 +260,20 @@ try {
     plan().dialogue=plan().dialogue.filter(d=>d.speaker);
     w.qa.render(); touch();
     await w.qa.persist();
+  }
+  /* ★컷 칩으로 고른 컷은 콘티에서도 강조된다 (사용자 지시 2026-09-20). 색을 못 박지 않고
+     「하나만 다르다」로 본다 — 무엇이 강조인지는 색이 아니라 갈린다는 사실이다. */
+  {
+    const fills=()=>Object.fromEntries([...$('board').querySelectorAll('[data-panel-shape]')]
+      .map(s=>[s.dataset.panelShape,s.getAttribute('fill')]));
+    let f=fills();
+    assert.equal(new Set(Object.values(f)).size,2,'고른 컷 하나만 바탕이 다르다');
+    assert.notEqual(f['0'],f['1'],'처음에는 첫 컷이 강조된다');
+    w.document.querySelector('[data-cut="2"]').click();
+    f=fills();
+    assert.notEqual(f['2'],f['1'],'칩을 누르면 그 컷이 강조된다');
+    assert.equal(f['0'],f['1'],'앞서 고른 컷은 평범해진다');
+    w.document.querySelector('[data-cut="0"]').click();
   }
   input(w.document.querySelector('[data-panel-field="summary"]'),'<img src=x onerror=alert(1)>');await w.qa.persist();
   assert.equal($('board').querySelector('img'),null,'story text must be escaped');

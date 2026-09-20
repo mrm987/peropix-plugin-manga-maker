@@ -13,6 +13,8 @@ let activeOperation=null;
 const replanDirections=new Map();
 const regionOpen=new Set();   // 「영역」을 펼쳐 둔 컷 (프로젝트:페이지:컷)
 const panelOpen=new Map();    // 펴 둔 컷의 번호 (프로젝트:페이지 → 0부터)
+/** 지금 펴 둔 컷 — 편집창과 콘티가 이 한 자리를 함께 읽는다 (콘티가 그 컷을 강조한다) */
+function openCut(plan){ return Math.min(panelOpen.get(`${doc.id}:${selected}`) ?? 0, plan.panels.length-1); }
 let viewPrefs={width:1200, fit:true, setupOpen:true, editorOpen:true, tab:'story'};
 try { viewPrefs={...viewPrefs,...JSON.parse(localStorage.getItem('manga-maker-view') || '{}')}; } catch {}
 const generationFields={model:'model',steps:'steps',cfg:'cfg',cfg_rescale:'cfgRescale',sampler:'sampler',seed:'seed'};
@@ -312,9 +314,8 @@ function renderEditor() {
 
   /* ★★컷은 **한 번에 하나만** 편다 (사용자 지시 2026-09-20). 컷을 세로로 쌓으면 하나를 고치는
      동안 나머지가 화면을 다 차지한다. 번호 칩으로 고르고 그 컷만 낸다. */
-  const spot = `${doc.id}:${selected}`;
-  const openCut = Math.min(panelOpen.get(spot) ?? 0, p.panels.length-1);
-  panelOpen.set(spot, openCut);
+  const cut = openCut(p);
+  panelOpen.set(`${doc.id}:${selected}`, cut);
   const card = (panel,i) => {
       const r = panel.region, regionShown = regionOpen.has(`${doc.id}:${selected}:${i}`);
       const head = free && r
@@ -331,7 +332,8 @@ function renderEditor() {
           + `<div class="slot-head">${slotBadge(num(j),'cast',s.character)}${whoPick(s.character)}<button data-remove-subject="${j}" class="icon-btn" title="${T('이 컷에서 빼기')}" aria-label="${T('이 컷에서 빼기')}">${trash}</button></div>`
           + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
           + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
-          + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div>`
+          /* ★★컷 안 위치는 **콘티에서 끌어서만** 정한다 (사용자 지시 2026-09-20). 숫자 둘을 손으로
+             맞추는 것보다 표식을 끄는 것이 빠르고, 내레이션도 이미 끌기뿐이라 방법이 하나로 모인다. */
           + (talk ? panel.dialogue.map((d,k)=>d.speaker===s.character ? lineRow(d,k) : '').join('')
                     + `<button class="ghost" data-add-line="${i}" data-add-for="${j}">${T('대사 추가')}</button>` : '')
           + '</div>').join('');
@@ -354,8 +356,8 @@ function renderEditor() {
   };
   // ★칩에는 번호만 적는다 — 이름은 컷마다 없고, 짧아야 한 줄에 다 선다
   $('panelList').innerHTML =
-    `<div class="cut-tabs">${p.panels.map((_,i)=>`<button class="cut-tab" data-cut="${i}" aria-pressed="${i===openCut}" title="${T('{n}번 컷',{n:i+1})}">${i+1}</button>`).join('')}</div>`
-    + card(p.panels[openCut], openCut);
+    `<div class="cut-tabs">${p.panels.map((_,i)=>`<button class="cut-tab" data-cut="${i}" aria-pressed="${i===cut}" title="${T('{n}번 컷',{n:i+1})}">${i+1}</button>`).join('')}</div>`
+    + card(p.panels[cut], cut);
 }
 function regionEditor(r) {
   const cell = (key,label) => `<label>${label}<input data-region-field="${key}" type="number" min="${key==='w'||key==='h' ? '.05':'0'}" max="1" step=".01" value="${r[key]}"></label>`;
@@ -457,12 +459,20 @@ function renderBoard() {
   const drawing=boxes().map((box,i)=>({box,i})).sort((a,b)=>layer(a.i)-layer(b.i));
   // ★번호는 NAI 에 실리는 차례 그대로다 — 「실제 NAI 프롬프트」 목록의 번호와 같다
   const slots=promptSlots();
+  /* ★컷 칩으로 고른 컷을 여기서도 강조한다 (사용자 지시 2026-09-20) — 편집창에서 고치고 있는 것이
+     지면의 어디인지 바로 보이게. 색은 앱 토큰이 아니라 고정값이다 (콘티는 흰 지면을 그리는 자리다). */
+  const cut=openCut(pg);
   $('board').innerHTML = `<svg viewBox="0 0 500 ${H}" aria-label="페이지 콘티와 인물 위치"><rect width="500" height="${H}" fill="#fff"/>` + drawing.map(({box:[x,y,w,h],i})=>{
     const panel = pg.panels[i], frame=pg.layout==='free' ? panel.region.frame : 'rectangle', px=x*500+7, py=y*H+7, pw=w*500-14, ph=h*H-14;
     const polygon=[[0,0],[1,0],[1,1],[0,1]].map(([u,v])=>{const [a,b]=pointInRegion([x,y,w,h],frame,u,v);return `${a*500},${b*H}`;}).join(' ');
     const summary = Array.from(panel.summary).slice(0,Math.floor(pw/13)*2).join('');
     const rows = summary.match(new RegExp(`.{1,${Math.max(1,Math.floor(pw/13)-1)}}`,'gu')) || [];
-    return `<g><polygon data-panel-shape="${i}" points="${polygon}" fill="#f8fafc" stroke="${frame==='borderless'?'none':'#263749'}" stroke-width="${frame==='inset'?4:2}"/><text x="${px+10}" y="${py+22}" fill="#526980" font-size="14" font-weight="600">${i+1}</text>${rows.map((row,k)=>`<text x="${px+10}" y="${py+43+k*16}" font-size="12" fill="#526980">${esc(row)}</text>`).join('')}${slots.map((s,n)=>({s,n})).filter(({s})=>s.panel===i).map(({s,n})=>{
+    const on=i===cut;
+    return `<g><polygon data-panel-shape="${i}" points="${polygon}" fill="${on?'#e6f0fa':'#f8fafc'}" stroke="${frame==='borderless'?'none':on?'#2f6fa8':'#263749'}" stroke-width="${(frame==='inset'?4:2)*(on?1.5:1)}"/>`
+      /* ★테두리 없는 컷은 선을 안 그리므로 옅은 바탕만으로는 고른 티가 안 난다. 그 컷만 점선으로
+         두른다 — 만화에는 없는 선이고 고르는 동안의 표시라는 뜻이 점선에 담긴다. */
+      + (on && frame==='borderless' ? `<polygon points="${polygon}" fill="none" stroke="#2f6fa8" stroke-width="2" stroke-dasharray="7 5"/>` : '')
+      + `<text x="${px+10}" y="${py+22}" fill="${on?'#2f6fa8':'#526980'}" font-size="14" font-weight="600">${i+1}</text>${rows.map((row,k)=>`<text x="${px+10}" y="${py+43+k*16}" font-size="12" fill="#526980">${esc(row)}</text>`).join('')}${slots.map((s,n)=>({s,n})).filter(({s})=>s.panel===i).map(({s,n})=>{
       const [a,b]=pointInRegion([x,y,w,h],frame,s.u,s.v);
       const cx=a*500, cy=b*H;
       if(s.kind==='cast'){
@@ -531,7 +541,8 @@ document.querySelector('.editor').addEventListener('input', e => {
       pg.panels[panelIndex].dialogue.forEach(d=>{ if(d.speaker===was) d.speaker=el.value; });
       markDirty(); renderEditor(); renderBoard(); controls(); return;
     }
-    subject[field] = (field==='x' || field==='y') ? +el.value : el.value;
+    // 남은 것은 카메라와 동작뿐이다 — 자리(x·y)는 콘티의 끌기가 정한다
+    subject[field] = el.value;
   } else if (el.dataset.lineField) {
     pg.panels[panelIndex].dialogue[+el.closest('[data-line]').dataset.line][el.dataset.lineField] = el.value;
     // 화자를 바꾸면 그 대사가 다른 인물 블록으로 옮겨 간다.
@@ -559,7 +570,7 @@ document.querySelector('.editor').addEventListener('click', e => {
   const cut=e.target.closest('[data-cut]');
   if (cut && !busy()) {
     panelOpen.set(`${doc.id}:${selected}`,+cut.dataset.cut);
-    renderEditor(); controls(); return;
+    renderEditor(); renderBoard(); controls(); return;
   }
   const region=e.target.closest('[data-region-toggle]');
   if (region && !busy()) {
