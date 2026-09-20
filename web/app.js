@@ -270,10 +270,7 @@ function controls() {
   if (doc?.pages.length) {
     // ★한도는 여기서만 건다 — 바로 위 줄이 편집창의 `disabled` 를 통째로 다시 칠한다.
     const panels=doc.pages[selected].plan.panels;
-    for (const button of document.querySelectorAll('[data-add-line]')) {
-      const panel=panels[+button.dataset.addLine];
-      button.disabled ||= panel.dialogue.length >= 3 || !panel.subjects.length;
-    }
+    for (const button of document.querySelectorAll('[data-add-line]')) button.disabled ||= panels[+button.dataset.addLine].dialogue.length >= 3;
     for (const button of document.querySelectorAll('[data-add-note]')) button.disabled ||= panels[+button.dataset.addNote].dialogue.length >= 3;
     for (const button of document.querySelectorAll('[data-add-subject]')) {
       const panel=panels[+button.dataset.addSubject];
@@ -328,7 +325,8 @@ function renderEditor() {
           + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
           + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
           + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div>`
-          + (talk ? panel.dialogue.map((d,k)=>d.speaker===s.character ? lineRow(d,k) : '').join('') : '')
+          + (talk ? panel.dialogue.map((d,k)=>d.speaker===s.character ? lineRow(d,k) : '').join('')
+                    + `<button class="ghost" data-add-line="${i}" data-add-for="${j}">${T('대사 추가')}</button>` : '')
           + '</div>').join('');
       // 인물이 없는 컷에도 배경만 그리는 캐릭터 프롬프트가 하나 생긴다 (`core.compile_page`). 번호를 차지하므로 함께 보인다.
       const blank = panel.subjects.length ? ''
@@ -344,7 +342,7 @@ function renderEditor() {
         + `<div class="ed-row"><label class="ed-label">${T('컷 태그')}</label>${textarea(`data-panel-field="scene" placeholder="${T('이 컷에만 있는 장면 태그')}"`,panel.scene || '',2)}</div>`
         + cast + blank + notes
         + `<div class="slot-add"><button class="ghost" data-add-subject="${i}">${T('인물 추가')}</button>`
-        + (talk ? `<button class="ghost" data-add-line="${i}">${T('대사 추가')}</button><button class="ghost" data-add-note="${i}">${T('내레이션 추가')}</button>` : '')
+        + (talk ? `<button class="ghost" data-add-note="${i}">${T('내레이션 추가')}</button>` : '')
         + '</div></article>';
     }).join('');
 }
@@ -410,7 +408,7 @@ function promptSlots(){
     const narration=withText?panel.dialogue.map((l,k)=>({l,k})).filter(({l})=>!l.speaker):[];
     narration.forEach(({l,k},j)=>{
       const u=(j+.5)/narration.length;
-      out.push({panel:i,kind:'note',line:k,u:rtl?1-u:u,v:.15,text:l.text});
+      out.push({panel:i,kind:'note',line:k,u:l.x==null?(rtl?1-u:u):l.x,v:l.y==null?.15:l.y,text:l.text});
     });
   });
   return out;
@@ -458,11 +456,12 @@ function renderBoard() {
       const cx=a*500, cy=b*H;
       if(s.kind==='cast'){
         const name=doc.outline.characters.find(c=>c.id===s.character)?.name || '';
-        // 인물만 끌 수 있다 — 나머지 둘은 자리를 셈으로 정한다 (`core.compile_page`)
         return `<g class="marker" data-marker="${i},${s.subject}" transform="translate(${cx},${cy})"><circle r="15" fill="${castColor(s.character)}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="5" font-size="12" fill="#fff">${n+1}</text><text text-anchor="middle" y="31" fill="#263749" font-size="12" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(name)}</text></g>`;
       }
+      // 인물 없는 컷의 칸만 못 끈다 — 자리를 코드가 정한다 (`core.compile_page`)
       const label=s.kind==='note' ? T('내레이션') : T('인물 없음');
-      return `<g transform="translate(${cx},${cy})"><rect x="-11" y="-11" width="22" height="22" rx="6" fill="${CAST_NEUTRAL}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="4" font-size="11" fill="#fff">${n+1}</text><text text-anchor="middle" y="26" fill="#526980" font-size="11" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(label)}</text></g>`;
+      const grab=s.kind==='note' ? ` class="marker" data-marker="${i},note,${s.line}"` : '';
+      return `<g${grab} transform="translate(${cx},${cy})"><rect x="-11" y="-11" width="22" height="22" rx="6" fill="${CAST_NEUTRAL}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="4" font-size="11" fill="#fff">${n+1}</text><text text-anchor="middle" y="26" fill="#526980" font-size="11" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(label)}</text></g>`;
     }).join('')}</g>`;
   }).join('')+'</svg>';
 }
@@ -573,10 +572,27 @@ document.querySelector('.editor').addEventListener('click', e => {
     const panel=doc.pages[selected].plan.panels[+addSubject.dataset.addSubject], taken=new Set(panel.subjects.map(s=>s.character));
     const spare=doc.outline.characters.find(c=>!taken.has(c.id));
     // 동작 태그는 비운 채로 둔다 — 넣지 않은 태그가 그림에 끼어들지 않게. `tags()` 가 빈 값을 버린다.
-    if (panel.subjects.length<4 && spare) panel.subjects.push({character:spare.id,camera:'',action:'',x:.5,y:.55});
+    // 자리는 앞서 넣은 인물과 겹치지 않게 벌려 둔다 (컷당 넷까지다).
+    const SPOTS=[.5,.7,.3,.85];
+    if (panel.subjects.length<4 && spare) panel.subjects.push({character:spare.id,camera:'',action:'',x:SPOTS[panel.subjects.length],y:.55});
   }
-  if (add) { const panel=doc.pages[selected].plan.panels[+add.dataset.addLine]; if(panel.dialogue.length<3 && panel.subjects.length) panel.dialogue.push({speaker:panel.subjects[0].character,text:'...'}); }
-  if (addNote) { const panel=doc.pages[selected].plan.panels[+addNote.dataset.addNote]; if(panel.dialogue.length<3) panel.dialogue.push({speaker:'',text:'...'}); }
+  if (add) {
+    const panel=doc.pages[selected].plan.panels[+add.dataset.addLine], who=panel.subjects[+add.dataset.addFor];
+    if (panel.dialogue.length<3 && who) panel.dialogue.push({speaker:who.character,text:'...'});
+  }
+  if (addNote) {
+    const panel=doc.pages[selected].plan.panels[+addNote.dataset.addNote];
+    if (panel.dialogue.length<3) {
+      // ★있던 내레이션의 자리를 먼저 굳힌다 — 자리를 안 들고 있으면 개수로 나눠 놓으므로, 하나 더
+      //   넣을 때 이미 놓인 것들이 밀린다 (`core.compile_page` 도 같은 규칙이다).
+      const rtl=options().direction==='rtl', notes=panel.dialogue.filter(l=>!l.speaker);
+      notes.forEach((l,j)=>{
+        if(l.x==null){ const u=(j+.5)/notes.length; l.x=Math.round((rtl?1-u:u)*100)/100; }
+        if(l.y==null) l.y=.15;
+      });
+      panel.dialogue.push({speaker:'',text:'...'});
+    }
+  }
   if (remove) doc.pages[selected].plan.panels[+remove.closest('[data-panel]').dataset.panel].dialogue.splice(+remove.dataset.removeLine,1);
   markDirty(); renderEditor(); renderBoard(); controls();
 });
@@ -587,8 +603,10 @@ $('board').addEventListener('pointerdown', e => {
   const marker=e.target.closest('[data-marker]');
   if (!marker || busy()) return;
   e.preventDefault();
-  const [pi,si]=marker.dataset.marker.split(',').map(Number), svg=marker.ownerSVGElement;
-  const [x,y,w,h]=boxes()[pi], panel=doc.pages[selected].plan.panels[pi], subject=panel.subjects[si], frame=doc.pages[selected].plan.layout==='free'?panel.region.frame:'rectangle';
+  const [pi,kind,at]=marker.dataset.marker.split(','), svg=marker.ownerSVGElement;
+  const [x,y,w,h]=boxes()[+pi], panel=doc.pages[selected].plan.panels[+pi], frame=doc.pages[selected].plan.layout==='free'?panel.region.frame:'rectangle';
+  // 인물은 `subjects[n]`, 내레이션은 `dialogue[n]` 이다. 둘 다 컷 안의 비율을 제 자리로 들고 있다.
+  const subject=kind==='note' ? panel.dialogue[+at] : panel.subjects[+kind];
   const move = event => {
     const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(svg.getScreenCTM().inverse());
     subject.x = Math.round(Math.max(.05,Math.min(.95,(point.x/500-x)/w))*100)/100;

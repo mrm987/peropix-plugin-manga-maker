@@ -211,22 +211,45 @@ try {
     assert.ok(w.qa.get().compiled[0].characters[badge(block)-1].prompt.includes('speech bubble'),
               '블록의 번호가 그 대사를 담은 캐릭터 프롬프트다');
     assert.equal(notes().length,0);
+    const plan=()=>w.qa.get().pages[0].plan.panels[0];
+    const adder=block.querySelector('[data-add-line]');
+    assert.ok(adder,'「대사 추가」는 인물 블록 안에 있다');
+    assert.equal(adder.dataset.addFor,'0','누른 인물의 대사로 붙는다');
+    adder.click();
+    assert.equal(plan().dialogue.at(-1).speaker,plan().subjects[0].character);
+    plan().dialogue.pop(); w.qa.render();
+
     panel0().querySelector('[data-add-note]').click();
     assert.equal(notes().length,1,'내레이션은 대사 줄이 아니라 자기 블록으로 추가된다');
     assert.equal(panel0().querySelectorAll('.dialogue-row').length,1,'내레이션이 대사 줄로 늘지 않는다');
     panel0().querySelector('[data-add-subject]').click();
-    const subjects=w.qa.get().pages[0].plan.panels[0].subjects;
-    assert.equal(subjects.length,2,'인물 추가가 컷의 인물을 늘린다');
-    assert.equal(subjects[1].action,'','새 인물의 동작 태그는 비어 있다');
+    assert.equal(plan().subjects.length,2,'인물 추가가 컷의 인물을 늘린다');
+    assert.equal(plan().subjects[1].action,'','새 인물의 동작 태그는 비어 있다');
     await w.qa.persist();
     assert.equal(notes().length,1);
-    assert.ok(w.qa.get().compiled[0].characters[badge(notes()[0])-1].prompt.startsWith('no humans, narration box'),
+    const at=badge(notes()[0]);
+    assert.ok(w.qa.get().compiled[0].characters[at-1].prompt.startsWith('no humans, narration box'),
               '내레이션 블록의 번호가 실제 내레이션 프롬프트다');
     assert.ok(!w.qa.get().compiled[0].characters[1].prompt.includes('undefined'),'빈 동작 태그는 프롬프트에서 빠진다');
+    assert.ok([...$('board').querySelectorAll('[data-marker]')].some(g=>g.dataset.marker.includes(',note,')),
+              '내레이션 표식도 잡아서 옮길 수 있다');
+    /* ★하나 더 넣어도 이미 놓인 내레이션은 제자리에 있어야 한다. 자리를 안 들고 있으면 개수로
+       나눠 놓으므로, 굳혀 두지 않으면 있던 것이 밀린다 (`core.compile_page`). */
+    const was={...w.qa.get().compiled[0].characters[at-1].center};
+    panel0().querySelector('[data-add-note]').click();
+    await w.qa.persist();
+    assert.equal(notes().length,2);
+    assert.deepEqual({...w.qa.get().compiled[0].characters[at-1].center},was,'내레이션을 더해도 있던 것은 안 움직인다');
+    /* `persist` 는 저장 표시(`dirty`)가 섰을 때만 보낸다. 끌기는 이 시험에서 못 하므로 자리만
+       손으로 옮기고, 편집창에 같은 값을 다시 써 넣어 표시를 세운다. */
+    const touch=()=>input(w.document.querySelector('[data-panel="0"] [data-panel-field="summary"]'),plan().summary);
+    plan().dialogue.find(d=>!d.speaker).x=.9;
+    touch(); await w.qa.persist();
+    assert.notDeepEqual({...w.qa.get().compiled[0].characters[at-1].center},was,'옮겨 놓은 자리가 그대로 실린다');
     // 뒤의 판정이 원래 페이지를 보도록 시험이 넣은 것을 도로 뺀다.
-    subjects.pop();
-    w.qa.get().pages[0].plan.panels[0].dialogue.pop();
-    w.qa.render();
+    plan().subjects.pop();
+    plan().dialogue=plan().dialogue.filter(d=>d.speaker);
+    w.qa.render(); touch();
     await w.qa.persist();
   }
   input(w.document.querySelector('[data-panel-field="summary"]'),'<img src=x onerror=alert(1)>');await w.qa.persist();

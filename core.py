@@ -126,6 +126,11 @@ class Subject(Model):
 class Dialogue(Model):
     speaker: str = Field(default="", max_length=100)
     text: str = Field(min_length=1, max_length=140)
+    # Local panel coordinates for a narration box (speaker empty); ignored for a spoken line, which
+    # rides its speaker's prompt. None means "lay it out with the other narration boxes along the top".
+    # The editor stamps these when it adds a line, so adding one never shifts the boxes already placed.
+    x: float | None = Field(default=None, ge=.05, le=.95)
+    y: float | None = Field(default=None, ge=.05, le=.95)
 
 
 class Region(Model):
@@ -351,12 +356,13 @@ def compile_page(page: Page, outline: Outline, options: Options) -> dict:
                                "center": page_point(region, .5, .5), "use_coord": True})
         narration = [line for line in spoken if not line.speaker]
         for j, line in enumerate(narration):
-            # Distribute text-only slots along the top of their panel, in reading order.
+            # Unplaced boxes spread along the top of their panel, in reading order; a placed one stays put.
             local_x = (j+.5)/len(narration)
             if options.direction == "rtl":
                 local_x = 1-local_x
+            center = page_point(region, local_x if line.x is None else line.x, .15 if line.y is None else line.y)
             characters.append({"prompt": tags("no humans, narration box", size, json.dumps(line.text, ensure_ascii=False)),
-                               "uc": "", "center": page_point(region, local_x, .15), "use_coord": True})
+                               "uc": "", "center": center, "use_coord": True})
         preview.append({"rect": [x, y, w, h], "frame": region.frame,
                         "polygon": [page_point(region, u, v) for u, v in [(0, 0), (1, 0), (1, 1), (0, 1)]], "markers": markers})
     if options.dialogue == "none":
@@ -412,7 +418,7 @@ left; the last row follows the same rule. It is NOT sorted by coordinates: a tal
 overlap several rows. Include only intentional overlaps.
 Do not include quality tags, medium tags, subject counts, negative prompts, or dialogue inside any
 prompt field. Dialogue belongs only in dialogue, with speaker=character id (empty for narration), in
-the requested language. Keep it brief, at most 600 characters per page. If dialogue=none return empty
+the requested language. Omit x,y on dialogue lines; narration boxes are placed in the editor. Keep it brief, at most 600 characters per page. If dialogue=none return empty
 dialogue arrays. Do not use quotation marks inside prompt fields.
 Budget: character prompt <=20 tags, action <=8 tags, camera <=3 tags, scene <=6 tags, setting <=6 tags.
 When layout_mode=free (default), ALWAYS use layout=free. Choose the number of panels from the story,
