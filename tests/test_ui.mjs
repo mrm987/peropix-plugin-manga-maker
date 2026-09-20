@@ -113,7 +113,8 @@ try {
   await wait(()=>w.qa.get()?.status==='ready','plan');
   assert.equal($('activitySpinner').hidden,true);
   assert.equal(calls.filter(([u,o])=>u.endsWith('/projects')&&o?.method==='POST').length,1,'double click must not create duplicate paid tasks');
-  assert.equal(w.document.querySelectorAll('.panel-card').length,5);
+  assert.equal(w.document.querySelectorAll('[data-cut]').length,5,'컷마다 번호 칩 하나');
+  assert.equal(w.document.querySelectorAll('.panel-card').length,1,'컷은 한 번에 하나만 편다');
   assert.equal(w.document.querySelectorAll('[data-marker]').length,5);
   assert.equal($('story').disabled,false);
   assert.equal($('pageCount').disabled,false);
@@ -199,9 +200,13 @@ try {
     const panel0=()=>w.document.querySelector('[data-panel="0"]');
     const badge=block=>+block.querySelector('.slot-badge').textContent;
     const notes=()=>[...panel0().querySelectorAll('.slot-block')].filter(b=>b.dataset.line!==undefined);
-    assert.deepEqual([...w.document.querySelectorAll('.slot-block')].map(badge),
-                     [...w.document.querySelectorAll('.slot-block')].map((_,i)=>i+1),
-                     '편집창 블록의 번호는 콘티와 같은 1..n 차례다');
+    const walk=[];
+    for (let i=0;i<w.qa.get().pages[0].plan.panels.length;i++) {
+      w.document.querySelector(`[data-cut="${i}"]`).click();
+      walk.push(...[...w.document.querySelectorAll('.slot-block')].map(badge));
+    }
+    assert.deepEqual(walk,walk.map((_,i)=>i+1),'컷을 차례로 펴면 편집창 번호가 콘티와 같은 1..n 이다');
+    w.document.querySelector('[data-cut="0"]').click();
     const said=panel0().querySelector('.slot-block[data-subject] .dialogue-row');
     assert.ok(said,'인물 대사는 그 인물 블록 안에 있다');
     const block=said.closest('.slot-block');
@@ -287,7 +292,7 @@ try {
   await wait(()=>w.qa.get()?.status==='ready'&&w.qa.get().pages[0].plan.panels.length===7,'free replan changes panel count');
   assert.equal(w.qa.get().pages[0].images.length,2);
   assert.equal(w.qa.get().pages[0].plan_history[0].plan.panels.length,5);
-  assert.equal(w.document.querySelectorAll('.panel-card').length,7);
+  assert.equal(w.document.querySelectorAll('[data-cut]').length,7,'다시 기획하면 칩도 그만큼 선다');
   assert.equal(JSON.parse(calls.findLast(([u,o])=>u.endsWith('/replan')&&o?.method==='POST')[1].body).instructions,'마지막 장면은 큰 컷으로, 대사는 짧게.');
   const beforeStop=JSON.stringify(w.qa.get().pages);
   $('replanPage').click();await wait(()=>!$('stop').hidden,'replan stop available');

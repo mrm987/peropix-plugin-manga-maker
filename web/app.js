@@ -12,6 +12,7 @@ let selectedStyle='', renamingStyle='';   // 목록에서 고른 화풍, 이름�
 let activeOperation=null;
 const replanDirections=new Map();
 const regionOpen=new Set();   // 「영역」을 펼쳐 둔 컷 (프로젝트:페이지:컷)
+const panelOpen=new Map();    // 펴 둔 컷의 번호 (프로젝트:페이지 → 0부터)
 let viewPrefs={width:1200, fit:true, setupOpen:true, editorOpen:true, tab:'story'};
 try { viewPrefs={...viewPrefs,...JSON.parse(localStorage.getItem('manga-maker-view') || '{}')}; } catch {}
 const generationFields={model:'model',steps:'steps',cfg:'cfg',cfg_rescale:'cfgRescale',sampler:'sampler',seed:'seed'};
@@ -307,11 +308,17 @@ function renderEditor() {
     `<div class="ed-row"><label class="ed-label">${T('페이지')}</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${T(layoutNames[name])}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${trash}</button></div>`
     + `<div class="ed-row"><label class="ed-label">${T('재기획')}</label><input id="replanInstructions" maxlength="4000" placeholder="${T('이 페이지를 어떻게 고칠지 (비우면 현재 설정으로)')}" value="${esc(replanDirections.get(`${doc.id}:${selected}`) || '')}"><button id="replanPage">${T('다시 기획')}</button></div>`
     + `<div class="ed-row"><label class="ed-label">${T('장면 태그')}</label><input data-page-field="setting" value="${esc(p.setting || '')}" placeholder="${T('장소, 시간, 조명 태그')}"></div>`
-    + (pg.error ? `<p class="page-error">${esc(pg.error)}</p>` : '')
-    + p.panels.map((panel,i) => {
-      const r = panel.region, open = regionOpen.has(`${doc.id}:${selected}:${i}`);
+    + (pg.error ? `<p class="page-error">${esc(pg.error)}</p>` : '');
+
+  /* ★★컷은 **한 번에 하나만** 편다 (사용자 지시 2026-09-20). 컷을 세로로 쌓으면 하나를 고치는
+     동안 나머지가 화면을 다 차지한다. 번호 칩으로 고르고 그 컷만 낸다. */
+  const spot = `${doc.id}:${selected}`;
+  const openCut = Math.min(panelOpen.get(spot) ?? 0, p.panels.length-1);
+  panelOpen.set(spot, openCut);
+  const card = (panel,i) => {
+      const r = panel.region, regionShown = regionOpen.has(`${doc.id}:${selected}:${i}`);
       const head = free && r
-        ? `<span class="cut-frame">${T(frameNames[r.frame])}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${open}">${T('영역')}</button>`
+        ? `<span class="cut-frame">${T(frameNames[r.frame])}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${regionShown}">${T('영역')}</button>`
         : '<span class="cut-box"></span>';
       const num = key => numbers.get(`${i}:${key}`) || 0;
       const named = id => doc.outline.characters.find(c=>c.id===id)?.name || '';
@@ -337,14 +344,18 @@ function renderEditor() {
           + textarea('data-line-field="text" aria-label="내레이션"',d.text,2)
           + '</div>').join('');
       return `<article class="panel-card" data-panel="${i}"><div class="cut-head"><span class="chip">${T('{n}번 컷',{n:i+1})}</span>${head}</div>`
-        + (free && r && open ? regionEditor(r) : '')
+        + (free && r && regionShown ? regionEditor(r) : '')
         + `<div class="ed-row"><label class="ed-label">${T('장면 요약')}</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
         + `<div class="ed-row"><label class="ed-label">${T('컷 태그')}</label>${textarea(`data-panel-field="scene" placeholder="${T('이 컷에만 있는 장면 태그')}"`,panel.scene || '',2)}</div>`
         + cast + blank + notes
         + `<div class="slot-add"><button class="ghost" data-add-subject="${i}">${T('인물 추가')}</button>`
         + (talk ? `<button class="ghost" data-add-note="${i}">${T('내레이션 추가')}</button>` : '')
         + '</div></article>';
-    }).join('');
+  };
+  // ★칩에는 번호만 적는다 — 이름은 컷마다 없고, 짧아야 한 줄에 다 선다
+  $('panelList').innerHTML =
+    `<div class="cut-tabs">${p.panels.map((_,i)=>`<button class="cut-tab" data-cut="${i}" aria-pressed="${i===openCut}" title="${T('{n}번 컷',{n:i+1})}">${i+1}</button>`).join('')}</div>`
+    + card(p.panels[openCut], openCut);
 }
 function regionEditor(r) {
   const cell = (key,label) => `<label>${label}<input data-region-field="${key}" type="number" min="${key==='w'||key==='h' ? '.05':'0'}" max="1" step=".01" value="${r[key]}"></label>`;
@@ -544,6 +555,11 @@ document.querySelector('.editor').addEventListener('click', e => {
       perform(async()=>{const next=await api(`projects/${doc.id}/pages/${page}/delete`,'POST',{revision:doc.revision});selected=Math.max(0,page-1);adopt(next);},'페이지 삭제','deletePage');
     })();
     return;
+  }
+  const cut=e.target.closest('[data-cut]');
+  if (cut && !busy()) {
+    panelOpen.set(`${doc.id}:${selected}`,+cut.dataset.cut);
+    renderEditor(); controls(); return;
   }
   const region=e.target.closest('[data-region-toggle]');
   if (region && !busy()) {
