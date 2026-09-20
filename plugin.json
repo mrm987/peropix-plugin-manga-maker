@@ -5,7 +5,7 @@
     "en": "Manga Maker",
     "ja": "マンガ制作"
   },
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": {
     "ko": "짧은 줄거리를 LLM 이 페이지와 컷으로 나누고, NAI V5 캐릭터 프롬프트로 만화를 생성합니다.",
     "en": "An LLM splits a short story into pages and panels, then generates the manga with positioned NAI V5 character prompts.",

@@ -115,8 +115,9 @@ class Subject(Model):
     character: str
     # Framing and angle tags (full body, from side, face focus ...). Compiled right after the kind.
     camera: str = Field(default="", max_length=200)
-    # Pose, gesture, gaze and expression tags for this appearance.
-    action: str = Field(min_length=1, max_length=700)
+    # Pose, gesture, gaze and expression tags for this appearance. May be empty: `tags()` drops empty
+    # parts, and a subject added by hand in the editor starts with nothing here.
+    action: str = Field(max_length=700)
     # Local panel coordinates. The compiler maps them to page coordinates.
     x: float = Field(default=.5, ge=.05, le=.95)
     y: float = Field(default=.55, ge=.05, le=.95)

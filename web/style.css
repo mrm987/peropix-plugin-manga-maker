@@ -246,15 +246,21 @@ button[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent
 .cut-head .cut-box { flex: 1 1 auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--text-2xs); color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cut-head > button { min-height: 24px; padding: 0 var(--sp-2); font-size: var(--text-2xs); background: none; border-color: transparent; }
 .cut-head > button[aria-expanded="true"] { color: var(--accent-ink); }
-/* 캐릭터 프롬프트 색 점 — 콘티의 표식과 같은 색이다 (`app.js` 의 `CAST_COLORS`) */
-.cast-dot { display: inline-block; width: 8px; height: 8px; margin-right: var(--sp-2); border-radius: 50%; flex-shrink: 0; }
-.chip > .cast-dot { margin-right: var(--sp-1); }
+/* 캐릭터 프롬프트 번호 배지 — 콘티의 표식과 같은 모양이고 같은 색이다 (`app.js` 의 `slotBadge`) */
+.slot-badge { display: inline-grid; place-items: center; width: 1.7em; height: 1.7em; font-size: var(--text-2xs); font-weight: var(--w-semi); color: #fff; border-radius: 50%; flex-shrink: 0; }
+.slot-badge.flat { border-radius: .45em; }
+.slot-badge.blank { color: var(--ink-dim); box-shadow: inset 0 0 0 1px var(--line); }
+.hint > .slot-badge { margin-right: var(--sp-2); vertical-align: -.45em; }
 .chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 var(--sp-2); font-size: var(--text-2xs); font-weight: var(--w-semi); color: var(--accent-ink); background: var(--accent-bg); border-radius: var(--r-1); white-space: nowrap; }
-.cast-line { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); }
-.cast-line > span.hint { margin-top: 0; }
+/* 블록 하나가 캐릭터 프롬프트 하나다. 왼쪽 세로선이 배지와 같은 색이라, 그 안의 대사가 같은 번호에 묶인다는 것이 보인다. */
+.slot-block { margin-top: var(--sp-4); padding: var(--sp-1) 0 var(--sp-3) var(--sp-3); border-left: 2px solid var(--slot-color, var(--line)); }
+.slot-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.slot-head > select { flex: 1 1 auto; min-width: 0; }
+.slot-head > .ed-note { flex: 1 1 auto; min-width: 0; font-size: var(--text-2xs); color: var(--ink-dim); }
+.slot-head > .icon-btn { flex: 0 0 auto; }
+.slot-add { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .region-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); }
 .region-grid label { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: var(--text-2xs); color: var(--ink-dim); }
-.subject { padding-top: 0; margin-top: 0; border-top: 0; }
 .dialogue-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) 34px; gap: var(--sp-2); align-items: start; margin-top: var(--sp-3); }
 .dialogue-row textarea { margin: 0; min-height: 58px; }
 .bible-char { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }

@@ -193,6 +193,42 @@ try {
       assert.ok(Math.abs(+m.at[2]-c.center.y*H)<.6,`표식 ${m.n} 의 세로 자리`);
     }
   }
+  /* ★인물 대사는 그 인물 블록 안에 들어가 **같은 번호**에 묶이고, 내레이션은 자기 블록으로 선다.
+     번호는 「실제 NAI 프롬프트」의 차례와 같아야 뜻이 있다 (`slotNumbers`). */
+  {
+    const panel0=()=>w.document.querySelector('[data-panel="0"]');
+    const badge=block=>+block.querySelector('.slot-badge').textContent;
+    const notes=()=>[...panel0().querySelectorAll('.slot-block')].filter(b=>b.dataset.line!==undefined);
+    assert.deepEqual([...w.document.querySelectorAll('.slot-block')].map(badge),
+                     [...w.document.querySelectorAll('.slot-block')].map((_,i)=>i+1),
+                     '편집창 블록의 번호는 콘티와 같은 1..n 차례다');
+    const said=panel0().querySelector('.slot-block[data-subject] .dialogue-row');
+    assert.ok(said,'인물 대사는 그 인물 블록 안에 있다');
+    const block=said.closest('.slot-block');
+    assert.equal(block.dataset.subject,'0','대사가 화자의 블록에 묶인다');
+    assert.ok([...said.querySelector('[data-line-field="speaker"]').options].every(o=>o.value),
+              '화자 목록에 내레이션이 없다 — 내레이션은 따로 추가한다');
+    assert.ok(w.qa.get().compiled[0].characters[badge(block)-1].prompt.includes('speech bubble'),
+              '블록의 번호가 그 대사를 담은 캐릭터 프롬프트다');
+    assert.equal(notes().length,0);
+    panel0().querySelector('[data-add-note]').click();
+    assert.equal(notes().length,1,'내레이션은 대사 줄이 아니라 자기 블록으로 추가된다');
+    assert.equal(panel0().querySelectorAll('.dialogue-row').length,1,'내레이션이 대사 줄로 늘지 않는다');
+    panel0().querySelector('[data-add-subject]').click();
+    const subjects=w.qa.get().pages[0].plan.panels[0].subjects;
+    assert.equal(subjects.length,2,'인물 추가가 컷의 인물을 늘린다');
+    assert.equal(subjects[1].action,'','새 인물의 동작 태그는 비어 있다');
+    await w.qa.persist();
+    assert.equal(notes().length,1);
+    assert.ok(w.qa.get().compiled[0].characters[badge(notes()[0])-1].prompt.startsWith('no humans, narration box'),
+              '내레이션 블록의 번호가 실제 내레이션 프롬프트다');
+    assert.ok(!w.qa.get().compiled[0].characters[1].prompt.includes('undefined'),'빈 동작 태그는 프롬프트에서 빠진다');
+    // 뒤의 판정이 원래 페이지를 보도록 시험이 넣은 것을 도로 뺀다.
+    subjects.pop();
+    w.qa.get().pages[0].plan.panels[0].dialogue.pop();
+    w.qa.render();
+    await w.qa.persist();
+  }
   input(w.document.querySelector('[data-panel-field="summary"]'),'<img src=x onerror=alert(1)>');await w.qa.persist();
   assert.equal($('board').querySelector('img'),null,'story text must be escaped');
   $('generatePage').click();

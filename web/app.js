@@ -267,7 +267,19 @@ function controls() {
   // 40페이지가 차면 더 이어서 그릴 수 없다 (서버 상한과 같은 값).
   if (doc?.outline && doc.outline.pages.length >= 40) for (const id of ['plan','automatic']) $(id).disabled = true;
   for (const input of document.querySelectorAll('.editor input,.editor textarea,.editor select,.editor button')) input.disabled = b;
-  if (doc?.pages.length) for (const button of document.querySelectorAll('[data-add-line]')) button.disabled ||= doc.pages[selected].plan.panels[+button.dataset.addLine].dialogue.length >= 3;
+  if (doc?.pages.length) {
+    // ★한도는 여기서만 건다 — 바로 위 줄이 편집창의 `disabled` 를 통째로 다시 칠한다.
+    const panels=doc.pages[selected].plan.panels;
+    for (const button of document.querySelectorAll('[data-add-line]')) {
+      const panel=panels[+button.dataset.addLine];
+      button.disabled ||= panel.dialogue.length >= 3 || !panel.subjects.length;
+    }
+    for (const button of document.querySelectorAll('[data-add-note]')) button.disabled ||= panels[+button.dataset.addNote].dialogue.length >= 3;
+    for (const button of document.querySelectorAll('[data-add-subject]')) {
+      const panel=panels[+button.dataset.addSubject];
+      button.disabled ||= panel.subjects.length >= 4 || panel.subjects.length >= doc.outline.characters.length;
+    }
+  }
   if ($('deletePage')) $('deletePage').disabled = b || !doc || doc.outline.pages.length <= 1;
   updateActivity();
 }
@@ -291,8 +303,9 @@ const textarea = (attrs, value, rows=3) => `<textarea ${attrs} rows="${rows}">${
 function renderEditor() {
   const pg = doc.pages[selected], p = pg.plan;
   const choices = [['free',null],...Object.entries(config.layouts).filter(([,boxes]) => boxes.length === p.panels.length)];
-  const free = p.layout === 'free', numbers = slotNumbers(promptSlots());
+  const free = p.layout === 'free', numbers = slotNumbers(promptSlots()), talk = options().dialogue !== 'none';
   const trash = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/></svg>';
+  const cross = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>';
   $('pageEditor').innerHTML =
     `<div class="ed-row"><label class="ed-label">${T('페이지')}</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${T(layoutNames[name])}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${trash}</button></div>`
     + `<div class="ed-row"><label class="ed-label">${T('재기획')}</label><input id="replanInstructions" maxlength="4000" placeholder="${T('이 페이지를 어떻게 고칠지 (비우면 현재 설정으로)')}" value="${esc(replanDirections.get(`${doc.id}:${selected}`) || '')}"><button id="replanPage">${T('다시 기획')}</button></div>`
@@ -303,21 +316,36 @@ function renderEditor() {
       const head = free && r
         ? `<span class="cut-frame">${T(frameNames[r.frame])}</span><span class="cut-box">${r.x.toFixed(2)}, ${r.y.toFixed(2)} · ${r.w.toFixed(2)} × ${r.h.toFixed(2)}</span><button data-region-toggle="${i}" aria-expanded="${open}">${T('영역')}</button>`
         : '<span class="cut-box"></span>';
+      const num = key => numbers.get(`${i}:${key}`) || 0;
+      const named = id => doc.outline.characters.find(c=>c.id===id)?.name || '';
+      // 한 컷에 같은 인물을 두 번 넣지 않는다 — 대사가 화자 id 로 붙으므로 두 프롬프트에 함께 실린다.
+      const taken = new Set(panel.subjects.map(s=>s.character));
+      const whoPick = id => `<select data-subject-field="character" aria-label="인물">${doc.outline.characters.filter(c=>c.id===id || !taken.has(c.id)).map(c=>`<option value="${esc(c.id)}" ${c.id===id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`;
+      const lineRow = (d,k) => `<div class="dialogue-row" data-line="${k}"><select data-line-field="speaker" aria-label="화자">${panel.subjects.map(s=>`<option value="${esc(s.character)}" ${d.speaker===s.character?'selected':''}>${esc(named(s.character))}</option>`).join('')}</select>${textarea('data-line-field="text" aria-label="대사"',d.text,2)}<button data-remove-line="${k}" class="icon-btn" aria-label="대사 삭제">${cross}</button></div>`;
+      // ★블록 하나가 캐릭터 프롬프트 하나다. 인물의 대사는 그 인물 블록 안에 들어가 같은 번호에 묶인다.
+      const cast = panel.subjects.map((s,j) => `<div class="slot-block" data-subject="${j}" style="--slot-color:${castColor(s.character)}">`
+          + `<div class="slot-head">${slotBadge(num(j),'cast',s.character)}${whoPick(s.character)}<button data-remove-subject="${j}" class="icon-btn" title="${T('이 컷에서 빼기')}" aria-label="${T('이 컷에서 빼기')}">${trash}</button></div>`
+          + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
+          + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
+          + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div>`
+          + (talk ? panel.dialogue.map((d,k)=>d.speaker===s.character ? lineRow(d,k) : '').join('') : '')
+          + '</div>').join('');
+      // 인물이 없는 컷에도 배경만 그리는 캐릭터 프롬프트가 하나 생긴다 (`core.compile_page`). 번호를 차지하므로 함께 보인다.
+      const blank = panel.subjects.length ? ''
+        : `<div class="slot-block" style="--slot-color:${CAST_NEUTRAL}"><div class="slot-head">${slotBadge(num('empty'),'empty')}<span class="ed-note">${T('인물 없음')}</span></div></div>`;
+      const notes = !talk ? '' : panel.dialogue.map((d,k)=>({d,k})).filter(({d})=>!d.speaker).map(({d,k}) =>
+          `<div class="slot-block" data-line="${k}" style="--slot-color:${CAST_NEUTRAL}">`
+          + `<div class="slot-head">${slotBadge(num(`note:${k}`),'note')}<span class="ed-note">${T('내레이션')}</span><button data-remove-line="${k}" class="icon-btn" title="${T('내레이션 삭제')}" aria-label="${T('내레이션 삭제')}">${trash}</button></div>`
+          + textarea('data-line-field="text" aria-label="내레이션"',d.text,2)
+          + '</div>').join('');
       return `<article class="panel-card" data-panel="${i}"><div class="cut-head"><span class="chip">${T('{n}번 컷',{n:i+1})}</span>${head}</div>`
         + (free && r && open ? regionEditor(r) : '')
         + `<div class="ed-row"><label class="ed-label">${T('장면 요약')}</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
         + `<div class="ed-row"><label class="ed-label">${T('컷 태그')}</label>${textarea(`data-panel-field="scene" placeholder="${T('이 컷에만 있는 장면 태그')}"`,panel.scene || '',2)}</div>`
-        + panel.subjects.map((s,j) => `<div class="subject" data-subject="${j}">`
-            + `<div class="cast-line"><span class="chip" title="${T('캐릭터 프롬프트 {n}',{n:numbers.get(`${i}:${j}`) || 0})}"><i class="cast-dot" style="background:${castColor(s.character)}"></i>${numbers.get(`${i}:${j}`) || 0}</span><span class="ed-note">${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</span></div>`
-            + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
-            + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
-            + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div></div>`).join('')
-        + (options().dialogue !== 'none'
-            ? `<div class="cast-line"><span class="ed-note">${T('대사')}</span></div>`
-              + panel.dialogue.map((d,j) => `<div class="dialogue-row" data-line="${j}"><select data-line-field="speaker" aria-label="화자"><option value="">${T('내레이션')}</option>${panel.subjects.map(s=>`<option value="${esc(s.character)}" ${d.speaker===s.character?'selected':''}>${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</option>`).join('')}</select>${textarea('data-line-field="text" aria-label="대사"',d.text,2)}<button data-remove-line="${j}" class="icon-btn" aria-label="대사 삭제"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div>`).join('')
-              + `<button class="ghost" data-add-line="${i}" ${panel.dialogue.length>=3?'disabled':''}>${T('대사 추가')}</button>`
-            : '')
-        + '</article>';
+        + cast + blank + notes
+        + `<div class="slot-add"><button class="ghost" data-add-subject="${i}">${T('인물 추가')}</button>`
+        + (talk ? `<button class="ghost" data-add-line="${i}">${T('대사 추가')}</button><button class="ghost" data-add-note="${i}">${T('내레이션 추가')}</button>` : '')
+        + '</div></article>';
     }).join('');
 }
 function regionEditor(r) {
@@ -379,19 +407,34 @@ function promptSlots(){
   pg.panels.forEach((panel,i)=>{
     panel.subjects.forEach((s,j)=>out.push({panel:i,kind:'cast',subject:j,character:s.character,u:s.x,v:s.y}));
     if(!panel.subjects.length)out.push({panel:i,kind:'empty',u:.5,v:.5});
-    const narration=withText?panel.dialogue.filter(l=>!l.speaker):[];
-    narration.forEach((line,j)=>{
+    const narration=withText?panel.dialogue.map((l,k)=>({l,k})).filter(({l})=>!l.speaker):[];
+    narration.forEach(({l,k},j)=>{
       const u=(j+.5)/narration.length;
-      out.push({panel:i,kind:'note',u:rtl?1-u:u,v:.15,text:line.text});
+      out.push({panel:i,kind:'note',line:k,u:rtl?1-u:u,v:.15,text:l.text});
     });
   });
   return out;
 }
-/** 번호를 붙여 돌려준다 — 컷·인물로 찾을 수 있게 (`0:1` = 첫 컷의 둘째 인물) */
+/** 번호를 붙여 돌려준다 — 컷 안의 자리로 찾을 수 있게.
+ *  `0:1` = 첫 컷의 둘째 인물 · `0:note:2` = 첫 컷의 셋째 대사 줄인 내레이션 · `0:empty` = 인물이 없는 첫 컷 */
 function slotNumbers(slots){
   const map=new Map();
-  slots.forEach((s,n)=>{ if(s.kind==='cast')map.set(`${s.panel}:${s.subject}`,n+1); });
+  slots.forEach((s,n)=>{
+    if(s.kind==='cast')map.set(`${s.panel}:${s.subject}`,n+1);
+    else if(s.kind==='note')map.set(`${s.panel}:note:${s.line}`,n+1);
+    else map.set(`${s.panel}:empty`,n+1);
+  });
   return map;
+}
+/** 콘티 표식과 같은 모양의 번호 배지 — 인물은 그 인물 색 동그라미, 나머지는 중립색 둥근 사각형.
+ *
+ *  ★모양과 색의 기준은 `renderBoard` 의 표식이다. 한쪽만 고치면 콘티와 편집창이 갈린다.
+ *  ★`kind` 가 비면 무엇인지 모르는 것이다 (「실제 NAI 프롬프트」가 마지막 저장분이라 화면과
+ *    개수가 어긋난 동안). 그때는 색을 칠하지 않고 테두리만 그린다. */
+function slotBadge(n,kind,character){
+  const cast=kind==='cast';
+  const paint=kind ? ` style="background:${cast?castColor(character):CAST_NEUTRAL}"` : '';
+  return `<span class="slot-badge${cast?'':' flat'}${kind?'':' blank'}"${paint} title="${T('캐릭터 프롬프트 {n}',{n})}">${n}</span>`;
 }
 function pointInRegion(box,frame,u,v) {
   if(frame==='slant-up')v=.15*(1-u)+.85*v;
@@ -441,8 +484,7 @@ function renderPrompts() {
   $('prompts').innerHTML = `<p class="hint">${T('베이스 프롬프트')}</p><pre>${esc(p.prompt)}</pre><p class="hint">${T('네거티브 프롬프트')}</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>{
     const s=fresh?slots[i]:null;
     const name=!s ? '' : s.kind==='cast' ? (doc.outline.characters.find(x=>x.id===s.character)?.name || '') : s.kind==='note' ? T('내레이션') : T('인물 없음');
-    const color=s&&s.kind==='cast' ? castColor(s.character) : CAST_NEUTRAL;
-    return `<p class="hint">${s?`<i class="cast-dot" style="background:${color}"></i>`:''}${T('캐릭터 프롬프트 {n} ({x}, {y})',{n:i+1,x:c.center.x,y:c.center.y})}${name?` · ${esc(name)}`:''}</p><pre>${esc(c.prompt)}</pre>`;
+    return `<p class="hint">${slotBadge(i+1,s?s.kind:'',s?s.character:'')}${T('캐릭터 프롬프트 ({x}, {y})',{x:c.center.x,y:c.center.y})}${name?` · ${esc(name)}`:''}</p><pre>${esc(c.prompt)}</pre>`;
   }).join('');
 }
 
@@ -471,9 +513,20 @@ document.querySelector('.editor').addEventListener('input', e => {
   }
   else if (el.dataset.panelField) pg.panels[panelIndex][el.dataset.panelField] = el.value;
   else if (el.dataset.subjectField) {
-    const field=el.dataset.subjectField;
-    pg.panels[panelIndex].subjects[+el.closest('[data-subject]').dataset.subject][field] = (field==='action' || field==='camera') ? el.value : +el.value;
-  } else if (el.dataset.lineField) pg.panels[panelIndex].dialogue[+el.closest('[data-line]').dataset.line][el.dataset.lineField] = el.value;
+    const field=el.dataset.subjectField, subject=pg.panels[panelIndex].subjects[+el.closest('[data-subject]').dataset.subject];
+    if (field==='character') {
+      // 대사는 화자 id 로 인물에 붙는다 — 인물을 바꾸면 그 대사도 따라가야 `validate_page` 를 지난다.
+      const was=subject.character;
+      subject.character=el.value;
+      pg.panels[panelIndex].dialogue.forEach(d=>{ if(d.speaker===was) d.speaker=el.value; });
+      markDirty(); renderEditor(); renderBoard(); controls(); return;
+    }
+    subject[field] = (field==='x' || field==='y') ? +el.value : el.value;
+  } else if (el.dataset.lineField) {
+    pg.panels[panelIndex].dialogue[+el.closest('[data-line]').dataset.line][el.dataset.lineField] = el.value;
+    // 화자를 바꾸면 그 대사가 다른 인물 블록으로 옮겨 간다.
+    if (el.dataset.lineField==='speaker') { markDirty(); renderEditor(); renderBoard(); controls(); return; }
+  }
   else if (el.dataset.charField) doc.outline.characters[+el.closest('[data-character]').dataset.character][el.dataset.charField] = el.value;
   markDirty(); renderBoard();
 });
@@ -499,11 +552,33 @@ document.querySelector('.editor').addEventListener('click', e => {
     regionOpen.has(key) ? regionOpen.delete(key) : regionOpen.add(key);
     renderEditor(); controls(); return;
   }
-  const add=e.target.closest('[data-add-line]'), remove=e.target.closest('[data-remove-line]');
-  if (busy() || (!add && !remove)) return;
-  if (add) { const p=doc.pages[selected].plan.panels[+add.dataset.addLine]; if(p.dialogue.length<3) p.dialogue.push({speaker:p.subjects[0]?.character || '',text:'...'}); }
+  const dropSubject=e.target.closest('[data-remove-subject]');
+  if (dropSubject && !busy()) {
+    const panel=doc.pages[selected].plan.panels[+dropSubject.closest('[data-panel]').dataset.panel], at=+dropSubject.dataset.removeSubject;
+    const who=panel.subjects[at].character, spoken=panel.dialogue.filter(d=>d.speaker===who).length;
+    void (async()=>{
+      // 대사를 잃는 삭제만 묻는다 — 빈 인물까지 물으면 확인창이 잡음이 된다.
+      if (spoken && !await confirmAsk({title:T('{name}, 이 컷에서 뺄까요?',{name:doc.outline.characters.find(c=>c.id===who)?.name || ''}),
+                                       body:T('이 인물의 대사 {n}줄도 함께 사라집니다.',{n:spoken}),ok:T('삭제'),danger:true})) return;
+      panel.dialogue=panel.dialogue.filter(d=>d.speaker!==who);
+      panel.subjects.splice(at,1);
+      markDirty(); renderEditor(); renderBoard(); controls();
+    })();
+    return;
+  }
+  const addSubject=e.target.closest('[data-add-subject]'), add=e.target.closest('[data-add-line]');
+  const addNote=e.target.closest('[data-add-note]'), remove=e.target.closest('[data-remove-line]');
+  if (busy() || (!addSubject && !add && !addNote && !remove)) return;
+  if (addSubject) {
+    const panel=doc.pages[selected].plan.panels[+addSubject.dataset.addSubject], taken=new Set(panel.subjects.map(s=>s.character));
+    const spare=doc.outline.characters.find(c=>!taken.has(c.id));
+    // 동작 태그는 비운 채로 둔다 — 넣지 않은 태그가 그림에 끼어들지 않게. `tags()` 가 빈 값을 버린다.
+    if (panel.subjects.length<4 && spare) panel.subjects.push({character:spare.id,camera:'',action:'',x:.5,y:.55});
+  }
+  if (add) { const panel=doc.pages[selected].plan.panels[+add.dataset.addLine]; if(panel.dialogue.length<3 && panel.subjects.length) panel.dialogue.push({speaker:panel.subjects[0].character,text:'...'}); }
+  if (addNote) { const panel=doc.pages[selected].plan.panels[+addNote.dataset.addNote]; if(panel.dialogue.length<3) panel.dialogue.push({speaker:'',text:'...'}); }
   if (remove) doc.pages[selected].plan.panels[+remove.closest('[data-panel]').dataset.panel].dialogue.splice(+remove.dataset.removeLine,1);
-  markDirty(); renderEditor(); controls();
+  markDirty(); renderEditor(); renderBoard(); controls();
 });
 document.querySelector('.editor').addEventListener('change',e=>{
   if(e.target.dataset.regionField && !busy()){renderEditor();renderBoard();controls();}
