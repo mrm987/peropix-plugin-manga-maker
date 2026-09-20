@@ -28,12 +28,14 @@
 
       <div class="compose">
         <div class="compose-head"><strong data-t>이번에 그릴 내용</strong><button id="example" class="ghost" data-t>예시 넣기</button></div>
-        <textarea id="story" rows="3" aria-label="이번에 그릴 내용" data-t-placeholder="이어서 그릴 때는 비워 둡니다"></textarea>
+        <!-- ★안내 문구는 `controls()` 가 상태에 따라 넣는다 (새 만화 ↔ 이어서 그리기) -->
+        <textarea id="story" rows="3" aria-label="이번에 그릴 내용"></textarea>
         <label class="compose-count"><span data-t>장수</span><select id="pageCount"><option value="0" data-t>자동</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
         <div class="compose-actions">
           <button id="plan" data-t>콘티만</button>
           <button id="automatic" class="primary" data-t>콘티 + 이미지</button>
         </div>
+        <p id="composeHint" class="hint" hidden></p>
       </div>
 
       <div class="llm-fixed">

@@ -236,7 +236,10 @@ async function listProjects() {
 }
 function adopt(p) {
   const switched = doc?.id !== p.id;
-  if(switched){$('importedOptions').hidden=true;$('story').value='';$('pageCount').value='0';}
+  // ★적어 둔 「이번에 그릴 내용」은 여기서 지우지 않는다 (사용자 지시 2026-09-20). 프로젝트를 새로
+  //   만들 때도 여기를 지나므로, 지우면 방금 적은 글이 콘티를 누르는 순간 사라진다. 앱을 다시 열 때도
+  //   복원해 둔 초안을 이 줄이 덮어썼다. 비우는 자리는 「새 만화」와 위의 프로젝트 고르개 둘뿐이다.
+  if(switched)$('importedOptions').hidden=true;
   if(doc?.id===p.id && (p.pages[selected]?.images.length || 0)>(doc.pages[selected]?.images.length || 0))mode='image';
   doc = p; dirty = false; selected = Math.min(selected, Math.max(0, p.pages.length-1));
   putOptions(p.options);
@@ -261,6 +264,11 @@ function controls() {
   $('stop').hidden = !b || requesting;
   $('export').disabled = !doc || requesting;
   const done = doc?.outline && doc.pages.length === doc.outline.pages.length;
+  // ★칸이 지금 무엇을 받는지 상태로 말한다 — 새 만화면 이번에 그릴 내용이고, 콘티가 있으면
+  //   이어서 그릴 내용이다. 둘 다 비워 두는 쪽이 아니라 적을 수 있는 칸이다.
+  $('story').placeholder = T(doc ? '이어서 그릴 내용 (비워도 됩니다)' : '무엇을 그릴지 적습니다');
+  $('composeHint').hidden = !doc;
+  if (doc) $('composeHint').textContent = T(done ? '지금 이야기 뒤에 이어서 그려집니다.' : '남은 페이지를 이어서 구성합니다.');
   // While planning still runs, already storyboarded pages can be queued for generation.
   const planning = !!doc?.accepting && doc.status==='planning' && !requesting;
   const queued = doc?.gen_requests || [], generating = doc?.generation?.page;
@@ -683,7 +691,7 @@ async function start(automatic) {
     } else {
       adopt(await api(`projects/${doc.id}/continue`,'POST',{revision:doc.revision,pages,instructions:text,automatic}));
     }
-    $('story').value='';$('pageCount').value='0';draft();
+    $('pageCount').value='0';draft();
     await listProjects();
   },'기획 요청 준비',automatic?'automatic':'plan');
 }
@@ -693,7 +701,7 @@ $('generatePage').onclick=()=>generate(selected);$('generateAll').onclick=()=>ge
 $('stop').onclick=()=>perform(async()=>{adopt(await api(`projects/${doc.id}/stop`,'POST',{}));await listProjects();},'즉시 중단','stop');
 function resetComposition(){ $('layoutMode').value='free';$('maxPanels').value='0';$('dialogue').value='ko'; }
 $('new').onclick=()=>perform(async()=>{doc=null;selected=0;dirty=false;try{localStorage.removeItem('manga-maker-current');}catch{}$('story').value='';$('projects').value='';resetComposition();draft();render();});
-$('projects').onchange=()=>perform(async()=>{const id=$('projects').value;if(id){selected=0;adopt(await api(`projects/${id}`));}else{doc=null;selected=0;$('story').value='';try{localStorage.removeItem('manga-maker-current');}catch{}render();}});
+$('projects').onchange=()=>perform(async()=>{const id=$('projects').value;if(id){selected=0;$('story').value='';$('pageCount').value='0';draft();adopt(await api(`projects/${id}`));}else{doc=null;selected=0;$('story').value='';draft();try{localStorage.removeItem('manga-maker-current');}catch{}render();}});
 $('export').onclick=()=>perform(async()=>{
   const response=await fetch(new URL(`projects/${doc.id}/export`,base));
   if(!response.ok)throw new Error(T('ZIP을 저장하지 못했습니다.'));

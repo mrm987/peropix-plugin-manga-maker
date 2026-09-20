@@ -49,6 +49,9 @@ try {
     const target=new URL(tag.getAttribute('src')||tag.getAttribute('href'),url);
     const r=await fetch(target);assert.equal(r.status,200,target.href);
   }
+  // 콘티가 없을 때 — 안내 줄은 없고, 칸은 이번에 그릴 내용을 받는다
+  assert.equal($('composeHint').hidden,true,'콘티가 없으면 버튼 아래에 줄이 없다');
+  assert.equal($('story').placeholder,'무엇을 그릴지 적습니다');
   $('plan').click();await wait(()=>!$('alert').hidden,'empty story validation');
   assert.equal(calls.filter(([u,o])=>u.endsWith('/projects')&&o?.method==='POST').length,0);
   assert.ok([...$('llmProvider').options].some(o=>o.value==='cli:codex'&&!o.disabled));
@@ -112,7 +115,7 @@ try {
   assert.equal($('width').value,'1024');assert.equal($('height').value,'1536');
   assert.equal(extractionCount(),beforeReuse,'Applying a saved style must not extract again');
   input($('size'),'832,1216','change');
-  $('workspace').value='QA';$('example').click();$('plan').click();$('plan').click();
+  $('workspace').value='QA';$('example').click();const exampleStory=$('story').value;$('plan').click();$('plan').click();
   await wait(()=>w.qa.get()?.status==='planning','planning activity');
   assert.equal($('activitySpinner').hidden,false);
   await wait(()=>w.qa.get()?.status==='ready','plan');
@@ -123,6 +126,11 @@ try {
   assert.equal(w.document.querySelectorAll('[data-marker]').length,5);
   assert.equal($('story').disabled,false);
   assert.equal($('pageCount').disabled,false);
+  // ★사용자 지시 2026-09-20: 콘티를 만들어도 적어 둔 글은 남는다. 그리고 그 뒤로는 이어서 그리는 칸이다.
+  assert.equal($('story').value,exampleStory,'콘티를 만들어도 적어 둔 글은 남는다');
+  assert.equal($('story').placeholder,'이어서 그릴 내용 (비워도 됩니다)');
+  assert.equal($('composeHint').hidden,false);
+  assert.equal($('composeHint').textContent,'지금 이야기 뒤에 이어서 그려집니다.','콘티가 있으면 뒤에 이어 그린다고 알린다');
   const pid=w.qa.get().id;
   assert.equal(w.qa.get().llm.provider,'cli:codex');
   assert.equal(w.qa.get().llm.model,'fixture-codex');
@@ -379,10 +387,12 @@ try {
   const sent=JSON.parse(calls.findLast(([u,o])=>u.endsWith('/continue')&&o?.method==='POST')[1].body);
   assert.equal(sent.instructions,'둘이 바닷가에서 잃어버린 모자를 찾는다.');assert.equal(sent.pages,1);
   assert.equal(w.qa.get().id,pid);
-  assert.equal($('story').value,'','보낸 뒤 입력 칸은 비운다');
+  assert.equal($('story').value,'둘이 바닷가에서 잃어버린 모자를 찾는다.','보낸 뒤에도 적어 둔 글은 남는다');
   assert.equal($('pageCount').value,'0');
   assert.equal(w.qa.get().pages[pagesNow].images.length,0);
   $('new').click();await wait(()=>!w.qa.get(),'new project');
+  assert.equal($('story').value,'','「새 만화」는 칸을 비운다');
+  assert.equal($('composeHint').hidden,true);
   assert.equal($('story').disabled,false);
   assert.equal($('content').hidden,true);
   assert.equal($('alert').hidden,true);
