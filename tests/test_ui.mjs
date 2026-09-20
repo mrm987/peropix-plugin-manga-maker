@@ -6,6 +6,11 @@ import { JSDOM } from '../../../_tmp/manga-maker-test-tools/node_modules/jsdom/l
 const url='http://127.0.0.1:8779/k/qa/plug/manga-maker/web/';
 const html=await fs.readFile(new URL('../web/index.html',import.meta.url),'utf8');
 const i18n=await fs.readFile(new URL('../web/i18n.js',import.meta.url),'utf8');
+const css=await fs.readFile(new URL('../web/style.css',import.meta.url),'utf8');
+/* ★사용자 지적 2026-09-20: 컷이 길어져 스크롤이 생기면 콘티 너비가 5.66px 줄었다. 구르는 칸
+   안에 콘티와 편집창이 같이 있어 스크롤바 10px 이 둘에 나뉜 것이다. jsdom 은 배치를 셈하지
+   않으므로 규칙이 살아 있는지만 본다. */
+assert.match(css,/\.work \{[^}]*scrollbar-gutter: stable/, '구르는 칸은 스크롤바 자리를 늘 비워 둔다');
 const script=(await fs.readFile(new URL('../web/app.js',import.meta.url),'utf8'))
   .replace('init().catch(error);','window.qaReady=init().catch(error);');
 /** 앱 창구 대역 — 확인창은 앱이 그리므로(`peropix.ask`) 여기서는 「확인」으로 답한다.
