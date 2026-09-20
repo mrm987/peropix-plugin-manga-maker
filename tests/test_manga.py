@@ -364,6 +364,36 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(len(core.regions(pg,'rtl')),8)
 
 
+class HostModuleTests(unittest.TestCase):
+    """`host_app()` must hand back the backend that is actually serving.
+
+    The packaged app starts the backend as `python server.py`, so the host module is named `__main__`
+    there and a plain `import server` ran the whole backend a second time: its own queue, which nothing
+    pumps, so a queued page waited forever and reported no error. Dev runs it under uvicorn as
+    `server:app`, where the module is already named `server`, which is why the plain import looked
+    correct. Both shapes have to keep working."""
+    @staticmethod
+    def as_host():
+        m=types.ModuleType('__main__');m.generate_queue=lambda *a,**k:None
+        return m
+
+    def test_packaged_reuses_the_running_main(self):
+        host=self.as_host()
+        with patch.dict(sys.modules,{'__main__':host}):
+            self.assertIs(mod.host_app(),host)
+
+    def test_dev_falls_back_to_the_named_import(self):
+        named=types.ModuleType('server')
+        with patch.dict(sys.modules,{'__main__':types.ModuleType('__main__'),'server':named}):
+            self.assertIs(mod.host_app(),named)
+
+    def test_packaged_never_reaches_the_import(self):
+        # A None entry makes `import server` raise, so reaching it at all fails the test.
+        host=self.as_host()
+        with patch.dict(sys.modules,{'__main__':host,'server':None}):
+            self.assertIs(mod.host_app(),host)
+
+
 class CliAdapterTests(unittest.TestCase):
     @staticmethod
     def process(stdout='',stderr='',code=0):

@@ -6,6 +6,7 @@ import copy
 import io
 import json
 import re
+import sys
 import time
 import uuid
 import zipfile
@@ -31,6 +32,17 @@ BUSY = {"planning", "generating", "stopping"}
 
 
 def host_app():
+    """The host backend module that is actually running.
+
+    The packaged app starts the backend as `python server.py`, so the host module is named `__main__`
+    there and a plain `import server` executes the whole backend a *second* time: its own queue that
+    nothing pumps, its own account store, its own output paths. A page queued into that copy waits
+    forever and reports no error. Dev runs the backend under uvicorn as `server:app`, where the module
+    is already named `server`, which is why the plain import looked correct.
+    """
+    main = sys.modules.get("__main__")
+    if hasattr(main, "generate_queue"):
+        return main
     # Deferred import: plugin loading occurs before host startup completes.
     import server
     return server
