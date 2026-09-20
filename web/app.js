@@ -74,7 +74,7 @@ function updateActivity(){
 /* ★★**백엔드가 준 상태 글도 옮긴다.** 그 글은 한국어로 오고 `_data` 에 그대로 저장되므로,
      본을 맞춰 화면에서 옮긴다. 아는 본이 없으면(오류 원문 등) 그대로 보여 준다. */
 const SERVER_MSGS=[
-  [/^(\d+)\/(\d+)페이지 컷과 위치 프롬프트 구성 중$/,'{n}/{total}페이지 컷과 위치 프롬프트 구성 중'],
+  [/^(\d+)\/(\d+)페이지 컷과 캐릭터 프롬프트 구성 중$/,'{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중'],
   [/^(\d+)\/(\d+)페이지 생성 중$/,'{n}/{total}페이지 생성 중'],
   [/^(\d+)\/(\d+)페이지 대사 번역 중$/,'{n}/{total}페이지 대사 번역 중'],
   [/^(\d+)페이지를 다시 기획했습니다\. 이전 콘티와 이미지는 보관되어 있습니다\.$/,'{n}페이지를 다시 기획했습니다. 이전 콘티와 이미지는 보관되어 있습니다.'],
@@ -291,7 +291,7 @@ const textarea = (attrs, value, rows=3) => `<textarea ${attrs} rows="${rows}">${
 function renderEditor() {
   const pg = doc.pages[selected], p = pg.plan;
   const choices = [['free',null],...Object.entries(config.layouts).filter(([,boxes]) => boxes.length === p.panels.length)];
-  const free = p.layout === 'free';
+  const free = p.layout === 'free', numbers = slotNumbers(promptSlots());
   const trash = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/></svg>';
   $('pageEditor').innerHTML =
     `<div class="ed-row"><label class="ed-label">${T('페이지')}</label><input data-page-field="title" aria-label="페이지 제목" value="${esc(p.title)}"><select data-page-field="layout" aria-label="컷 배치">${choices.map(([name])=>`<option value="${name}" ${name===p.layout?'selected':''}>${T(layoutNames[name])}</option>`).join('')}</select><button id="deletePage" class="icon-btn" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${trash}</button></div>`
@@ -308,7 +308,7 @@ function renderEditor() {
         + `<div class="ed-row"><label class="ed-label">${T('장면 요약')}</label>${textarea('data-panel-field="summary"',panel.summary,2)}</div>`
         + `<div class="ed-row"><label class="ed-label">${T('컷 태그')}</label>${textarea(`data-panel-field="scene" placeholder="${T('이 컷에만 있는 장면 태그')}"`,panel.scene || '',2)}</div>`
         + panel.subjects.map((s,j) => `<div class="subject" data-subject="${j}">`
-            + `<div class="cast-line"><span class="chip">${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</span></div>`
+            + `<div class="cast-line"><span class="chip" title="${T('캐릭터 프롬프트 {n}',{n:numbers.get(`${i}:${j}`) || 0})}"><i class="cast-dot" style="background:${castColor(s.character)}"></i>${numbers.get(`${i}:${j}`) || 0}</span><span class="ed-note">${esc(doc.outline.characters.find(c=>c.id===s.character)?.name)}</span></div>`
             + `<div class="ed-row"><label class="ed-label">${T('카메라')}</label><input data-subject-field="camera" value="${esc(s.camera || '')}" placeholder="full body, from side"></div>`
             + `<div class="ed-row"><label class="ed-label">${T('동작·표정')}</label>${textarea('data-subject-field="action"',s.action,2)}</div>`
             + `<div class="ed-row"><label class="ed-label">${T('컷 안 위치')}</label><input class="coord" data-subject-field="x" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 가로 위치" value="${s.x}"><input class="coord" data-subject-field="y" type="number" min="0.05" max="0.95" step="0.01" aria-label="컷 안 세로 위치" value="${s.y}"><span class="ed-note">${T('가로 · 세로')}</span></div></div>`).join('')
@@ -328,10 +328,70 @@ function regionEditor(r) {
 function renderBible() {
   $('characters').innerHTML = doc.outline.characters.map((c,i)=>`<div class="bible-char" data-character="${i}"><strong>${esc(c.name)}</strong><label>${T('모든 컷에 공유할 외형·의상')}${textarea('data-char-field="prompt"',c.prompt,4)}</label><label>${T('캐릭터 네거티브')}${textarea('data-char-field="uc"',c.uc,2)}</label></div>`).join('');
 }
+/** 읽는 순서 — **`core.reading_order` 와 같은 규칙**이다 (그쪽을 고치면 여기도 맞춘다).
+ *  ★예전에는 `y` 로 줄을 세워 정렬했는데, 세로로 긴 칸은 여러 줄에 걸치므로 그 방식이 그 칸을
+ *    다른 칸들 사이에 끼워 넣는다 — 콘티가 보여 주는 자리와 실제로 생성되는 자리가 어긋났다. */
+function readingOrder(rects, direction) {
+  const eps=.02;
+  const before=(a,b)=>{
+    if(a[1]+a[3]<=b[1]+eps)return true;
+    if(b[1]+b[3]<=a[1]+eps)return false;
+    const ax=a[0]+a[2]/2, bx=b[0]+b[2]/2;
+    return direction==='rtl' ? ax>bx : ax<bx;
+  };
+  const key=i=>[rects[i][1], direction==='rtl' ? -rects[i][0] : rects[i][0]];
+  const remaining=rects.map((_,i)=>i), order=[];
+  while(remaining.length){
+    const ready=remaining.filter(i=>!remaining.some(j=>j!==i&&before(rects[j],rects[i])));
+    const pool=ready.length?ready:remaining;
+    const pick=pool.reduce((best,i)=>{const a=key(i),b=key(best);return (a[0]<b[0]||(a[0]===b[0]&&a[1]<b[1]))?i:best;});
+    order.push(pick);remaining.splice(remaining.indexOf(pick),1);
+  }
+  return order;
+}
 function boxes() {
   const pg=doc.pages[selected].plan;
   if (pg.layout==='free') return pg.panels.map(p=>[p.region.x,p.region.y,p.region.w,p.region.h]);
-  return [...config.layouts[pg.layout]].sort((a,b)=>a[1]-b[1] || (options().direction==='rtl' ? b[0]-a[0] : a[0]-b[0]));
+  const rects=config.layouts[pg.layout];
+  return readingOrder(rects,options().direction).map(i=>rects[i]);
+}
+
+/** 캐릭터 프롬프트 색 — **같은 인물은 어느 컷에서나 같은 색**이다.
+ *  ★콘티는 흰 지면을 그리는 자리라 앱 토큰이 아니라 고정 색을 쓴다 (테마를 따라 바뀌면 안 된다). */
+const CAST_COLORS=['#3b7bac','#c77d43','#4d8f5b','#a4508b','#b4514a','#3f7f86','#8a7a3f','#6d6aa8'];
+/** 인물이 아닌 칸(내레이션 상자·인물 없는 컷) — 중립색 */
+const CAST_NEUTRAL='#78859a';
+function castColor(id){
+  const i=doc?.outline?.characters.findIndex(c=>c.id===id) ?? -1;
+  return i<0 ? CAST_NEUTRAL : CAST_COLORS[i%CAST_COLORS.length];
+}
+
+/** 이 페이지의 **캐릭터 프롬프트**를 NAI 에 실리는 차례 그대로 돌려준다.
+ *
+ *  ★★차례는 `core.compile_page` 가 정한다 — 컷 차례대로, 컷 안에서는 인물 → (인물이 없으면
+ *    빈 칸 하나) → 내레이션 상자. 콘티의 번호·편집창의 번호·「실제 NAI 프롬프트」 목록이
+ *    **같은 번호**를 쓰려면 이 차례가 그쪽과 같아야 한다.
+ *  ★`u`·`v` 는 컷 안의 비율이다 (`core.page_point` 에 넣는 값과 같다). */
+function promptSlots(){
+  const pg=doc?.pages[selected]?.plan;
+  if(!pg)return [];
+  const withText=options().dialogue!=='none', rtl=options().direction==='rtl', out=[];
+  pg.panels.forEach((panel,i)=>{
+    panel.subjects.forEach((s,j)=>out.push({panel:i,kind:'cast',subject:j,character:s.character,u:s.x,v:s.y}));
+    if(!panel.subjects.length)out.push({panel:i,kind:'empty',u:.5,v:.5});
+    const narration=withText?panel.dialogue.filter(l=>!l.speaker):[];
+    narration.forEach((line,j)=>{
+      const u=(j+.5)/narration.length;
+      out.push({panel:i,kind:'note',u:rtl?1-u:u,v:.15,text:line.text});
+    });
+  });
+  return out;
+}
+/** 번호를 붙여 돌려준다 — 컷·인물로 찾을 수 있게 (`0:1` = 첫 컷의 둘째 인물) */
+function slotNumbers(slots){
+  const map=new Map();
+  slots.forEach((s,n)=>{ if(s.kind==='cast')map.set(`${s.panel}:${s.subject}`,n+1); });
+  return map;
 }
 function pointInRegion(box,frame,u,v) {
   if(frame==='slant-up')v=.15*(1-u)+.85*v;
@@ -343,15 +403,23 @@ function renderBoard() {
   const opts = options(), H = 500 * opts.height / opts.width, pg = doc.pages[selected].plan;
   const layer=i=>pg.layout==='free' ? ({borderless:0,inset:2}[pg.panels[i].region.frame] ?? 1) : 1;
   const drawing=boxes().map((box,i)=>({box,i})).sort((a,b)=>layer(a.i)-layer(b.i));
+  // ★번호는 NAI 에 실리는 차례 그대로다 — 「실제 NAI 프롬프트」 목록의 번호와 같다
+  const slots=promptSlots();
   $('board').innerHTML = `<svg viewBox="0 0 500 ${H}" aria-label="페이지 콘티와 인물 위치"><rect width="500" height="${H}" fill="#fff"/>` + drawing.map(({box:[x,y,w,h],i})=>{
     const panel = pg.panels[i], frame=pg.layout==='free' ? panel.region.frame : 'rectangle', px=x*500+7, py=y*H+7, pw=w*500-14, ph=h*H-14;
     const polygon=[[0,0],[1,0],[1,1],[0,1]].map(([u,v])=>{const [a,b]=pointInRegion([x,y,w,h],frame,u,v);return `${a*500},${b*H}`;}).join(' ');
     const summary = Array.from(panel.summary).slice(0,Math.floor(pw/13)*2).join('');
     const rows = summary.match(new RegExp(`.{1,${Math.max(1,Math.floor(pw/13)-1)}}`,'gu')) || [];
-    return `<g><polygon data-panel-shape="${i}" points="${polygon}" fill="#f8fafc" stroke="${frame==='borderless'?'none':'#263749'}" stroke-width="${frame==='inset'?4:2}"/><text x="${px+10}" y="${py+22}" fill="#526980" font-size="14" font-weight="600">${i+1}</text>${rows.map((row,k)=>`<text x="${px+10}" y="${py+43+k*16}" font-size="12" fill="#526980">${esc(row)}</text>`).join('')}${panel.subjects.map((s,j)=>{
-      const [a,b]=pointInRegion([x,y,w,h],frame,s.x,s.y);
-      const cx=a*500, cy=b*H, name=doc.outline.characters.find(c=>c.id===s.character)?.name;
-      return `<g class="marker" data-marker="${i},${j}" transform="translate(${cx},${cy})"><circle r="15" fill="${j%2 ? '#c77d43' : '#3b7bac'}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="5" font-size="12" fill="white">${j+1}</text><text text-anchor="middle" y="31" fill="#263749" font-size="12" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(name)}</text></g>`;
+    return `<g><polygon data-panel-shape="${i}" points="${polygon}" fill="#f8fafc" stroke="${frame==='borderless'?'none':'#263749'}" stroke-width="${frame==='inset'?4:2}"/><text x="${px+10}" y="${py+22}" fill="#526980" font-size="14" font-weight="600">${i+1}</text>${rows.map((row,k)=>`<text x="${px+10}" y="${py+43+k*16}" font-size="12" fill="#526980">${esc(row)}</text>`).join('')}${slots.map((s,n)=>({s,n})).filter(({s})=>s.panel===i).map(({s,n})=>{
+      const [a,b]=pointInRegion([x,y,w,h],frame,s.u,s.v);
+      const cx=a*500, cy=b*H;
+      if(s.kind==='cast'){
+        const name=doc.outline.characters.find(c=>c.id===s.character)?.name || '';
+        // 인물만 끌 수 있다 — 나머지 둘은 자리를 셈으로 정한다 (`core.compile_page`)
+        return `<g class="marker" data-marker="${i},${s.subject}" transform="translate(${cx},${cy})"><circle r="15" fill="${castColor(s.character)}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="5" font-size="12" fill="#fff">${n+1}</text><text text-anchor="middle" y="31" fill="#263749" font-size="12" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(name)}</text></g>`;
+      }
+      const label=s.kind==='note' ? T('내레이션') : T('인물 없음');
+      return `<g transform="translate(${cx},${cy})"><rect x="-11" y="-11" width="22" height="22" rx="6" fill="${CAST_NEUTRAL}" stroke="#fff" stroke-width="2"/><text text-anchor="middle" y="4" font-size="11" fill="#fff">${n+1}</text><text text-anchor="middle" y="26" fill="#526980" font-size="11" paint-order="stroke" stroke="#fff" stroke-width="3">${esc(label)}</text></g>`;
     }).join('')}</g>`;
   }).join('')+'</svg>';
 }
@@ -367,7 +435,15 @@ function renderResult(version) {
 function renderPrompts() {
   const p = doc?.compiled?.[selected];
   if (!p) return;
-  $('prompts').innerHTML = `<p class="hint">${T('베이스 프롬프트')}</p><pre>${esc(p.prompt)}</pre><p class="hint">${T('네거티브 프롬프트')}</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>`<p class="hint">${T('위치 프롬프트 {n} ({x}, {y})',{n:i+1,x:c.center.x,y:c.center.y})}</p><pre>${esc(c.prompt)}</pre>`).join('');
+  /* ★`compiled` 는 마지막으로 저장한 판이고 `slots` 는 지금 화면이다. 개수가 다르면(고친 직후)
+     이름표를 붙이지 않는다 — 엉뚱한 이름을 붙이는 것보다 낫다. */
+  const slots=promptSlots(), fresh=slots.length===p.characters.length;
+  $('prompts').innerHTML = `<p class="hint">${T('베이스 프롬프트')}</p><pre>${esc(p.prompt)}</pre><p class="hint">${T('네거티브 프롬프트')}</p><pre>${esc(p.negative_prompt)}</pre>` + p.characters.map((c,i)=>{
+    const s=fresh?slots[i]:null;
+    const name=!s ? '' : s.kind==='cast' ? (doc.outline.characters.find(x=>x.id===s.character)?.name || '') : s.kind==='note' ? T('내레이션') : T('인물 없음');
+    const color=s&&s.kind==='cast' ? castColor(s.character) : CAST_NEUTRAL;
+    return `<p class="hint">${s?`<i class="cast-dot" style="background:${color}"></i>`:''}${T('캐릭터 프롬프트 {n} ({x}, {y})',{n:i+1,x:c.center.x,y:c.center.y})}${name?` · ${esc(name)}`:''}</p><pre>${esc(c.prompt)}</pre>`;
+  }).join('');
 }
 
 document.querySelector('.editor').addEventListener('input', e => {

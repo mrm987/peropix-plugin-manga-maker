@@ -373,7 +373,7 @@ async def plan_work(pid: str, automatic: bool):
             save(p)
         outline = Outline.model_validate(p["outline"])
         for index in range(len(p["pages"]), len(outline.pages)):
-            p["message"] = f"{index+1}/{len(outline.pages)}페이지 컷과 위치 프롬프트 구성 중"
+            p["message"] = f"{index+1}/{len(outline.pages)}페이지 컷과 캐릭터 프롬프트 구성 중"
             progress(p, "storyboard", index, len(outline.pages), index)
             save(p)
             page = await ask(Page, {

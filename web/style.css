@@ -246,6 +246,9 @@ button[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent
 .cut-head .cut-box { flex: 1 1 auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--text-2xs); color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cut-head > button { min-height: 24px; padding: 0 var(--sp-2); font-size: var(--text-2xs); background: none; border-color: transparent; }
 .cut-head > button[aria-expanded="true"] { color: var(--accent-ink); }
+/* 캐릭터 프롬프트 색 점 — 콘티의 표식과 같은 색이다 (`app.js` 의 `CAST_COLORS`) */
+.cast-dot { display: inline-block; width: 8px; height: 8px; margin-right: var(--sp-2); border-radius: 50%; flex-shrink: 0; }
+.chip > .cast-dot { margin-right: var(--sp-1); }
 .chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 var(--sp-2); font-size: var(--text-2xs); font-weight: var(--w-semi); color: var(--accent-ink); background: var(--accent-bg); border-radius: var(--r-1); white-space: nowrap; }
 .cast-line { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); }
 .cast-line > span.hint { margin-top: 0; }

@@ -287,7 +287,7 @@ def validate_page(page: Page, outline: Outline, options: Options) -> Page:
                 raise ValueError("대사의 화자가 이 컷에 없습니다. 내레이션은 speaker를 비워 주세요.")
     # Deliberate authoring budget, not a claim about the API hard limit.
     if slots > 22:
-        raise ValueError("이 제작기는 페이지당 위치 프롬프트를 22개까지 사용합니다.")
+        raise ValueError("이 제작기는 페이지당 캐릭터 프롬프트를 22개까지 사용합니다.")
     text = "\n\n".join(d.text for p in page.panels for d in p.dialogue)
     budget = 300 if options.model.endswith("curated") else 600
     if options.dialogue != "none" and len(text) > budget:

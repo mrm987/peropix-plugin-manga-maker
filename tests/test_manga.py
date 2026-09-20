@@ -141,6 +141,56 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(core.Options().cfg_rescale,0)
         self.assertEqual(core.Options().sampler,'k_euler_ancestral')
 
+    def test_character_prompt_order_matches_board_numbering(self):
+        """캐릭터 프롬프트의 차례 — 콘티·편집창·프롬프트 목록이 이 번호를 함께 쓴다.
+
+        컷 차례대로, 컷 안에서는 인물 → (인물이 없으면 빈 칸 하나) → 내레이션 상자다.
+        화면 쪽 `web/app.js` 의 `promptSlots()` 가 같은 차례를 다시 만들므로, 이 차례를
+        바꾸면 그쪽도 함께 고쳐야 한다."""
+        page = copy.deepcopy(FREE_PAGE)
+        page['panels'][0]['dialogue'] = [{'speaker': '', 'text': '그날 오후.'},
+                                         {'speaker': 'marin', 'text': 'おじゃまします。'}]
+        pg = core.Page.model_validate(page)
+        outline = core.Outline.model_validate(OUTLINE)
+        result = core.compile_page(pg, outline, core.Options())
+
+        def kind(c):
+            if 'narration box' in c['prompt']:
+                return 'note'
+            return 'empty' if c['prompt'].startswith('no humans') else 'cast'
+
+        expect = []
+        for panel in pg.panels:
+            expect += ['cast'] * len(panel.subjects)
+            if not panel.subjects:
+                expect.append('empty')
+            expect += ['note'] * sum(1 for d in panel.dialogue if not d.speaker)
+        self.assertEqual([kind(c) for c in result['characters']], expect)
+        self.assertIn('empty', expect)
+        self.assertIn('note', expect)
+
+    def test_every_character_prompt_sits_inside_its_panel(self):
+        """번호를 콘티에 찍으려면 좌표가 **그 컷 안**이어야 한다 — 내레이션 상자와 빈 칸도 그렇다."""
+        for source in (PAGE, FREE_PAGE):
+            page = copy.deepcopy(source)
+            page['panels'][0]['dialogue'] = [{'speaker': '', 'text': 'A'}, {'speaker': '', 'text': 'B'}]
+            pg = core.Page.model_validate(page)
+            outline = core.Outline.model_validate(OUTLINE)
+            for direction in ('rtl', 'ltr'):
+                result = core.compile_page(pg, outline, core.Options(direction=direction))
+                areas = core.regions(pg, direction)
+                owners = []
+                for panel, region in zip(pg.panels, areas):
+                    count = len(panel.subjects) + (0 if panel.subjects else 1)
+                    count += sum(1 for d in panel.dialogue if not d.speaker)
+                    owners += [region] * count
+                self.assertEqual(len(owners), len(result['characters']))
+                for region, c in zip(owners, result['characters']):
+                    self.assertTrue(region.x - 1e-6 <= c['center']['x'] <= region.x + region.w + 1e-6,
+                                    f"{direction} {c['center']} not in {region}")
+                    self.assertTrue(region.y - 1e-6 <= c['center']['y'] <= region.y + region.h + 1e-6,
+                                    f"{direction} {c['center']} not in {region}")
+
     def test_coordinates_text_and_real_nai_payload(self):
         pg, outline, opts=core.Page.model_validate(PAGE),core.Outline.model_validate(OUTLINE),core.Options()
         result=core.compile_page(pg,outline,opts)

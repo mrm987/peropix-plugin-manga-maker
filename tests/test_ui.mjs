@@ -175,6 +175,24 @@ try {
   assert.equal(w.qa.get().compiled[0].characters[0].center.x,.83);
   input(w.document.querySelector('[data-panel="0"] [data-region-field="frame"]'),'slant-down');await w.qa.persist();
   assert.equal(w.qa.get().compiled[0].characters[0].center.y,.4095);
+  /* ★★콘티의 번호와 자리가 **실제로 NAI 에 실리는 캐릭터 프롬프트**와 맞는가.
+     화면은 끌기에 바로 따라가려고 자리를 제 손으로 셈하므로(`promptSlots`·`boxes`), 서버의
+     `compile_page` 와 어긋날 수 있다. 어긋나면 번호를 보여 주는 뜻이 없어지므로 여기서 맞댄다. */
+  {
+    const chars=w.qa.get().compiled[0].characters;
+    const H=500*(+$('height').value)/(+$('width').value);
+    const marks=[...$('board').querySelectorAll('g[transform]')].map(g=>({
+      n:+g.querySelector('text').textContent,
+      at:/translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform')),
+    })).filter(m=>m.at&&Number.isInteger(m.n));
+    assert.equal(marks.length,chars.length,'캐릭터 프롬프트마다 표식 하나');
+    assert.deepEqual(marks.map(m=>m.n).sort((a,b)=>a-b),chars.map((_,i)=>i+1),'번호는 1..n');
+    for(const m of marks){
+      const c=chars[m.n-1];
+      assert.ok(Math.abs(+m.at[1]-c.center.x*500)<.6,`표식 ${m.n} 의 가로 자리`);
+      assert.ok(Math.abs(+m.at[2]-c.center.y*H)<.6,`표식 ${m.n} 의 세로 자리`);
+    }
+  }
   input(w.document.querySelector('[data-panel-field="summary"]'),'<img src=x onerror=alert(1)>');await w.qa.persist();
   assert.equal($('board').querySelector('img'),null,'story text must be escaped');
   $('generatePage').click();

@@ -197,7 +197,9 @@
     "실제 NAI 프롬프트": "Actual NAI prompt",
     "베이스 프롬프트": "Base prompt",
     "네거티브 프롬프트": "Negative prompt",
-    "위치 프롬프트 {n} ({x}, {y})": "Positioned prompt {n} ({x}, {y})",
+    "캐릭터 프롬프트 {n} ({x}, {y})": "Character prompt {n} ({x}, {y})",
+    "캐릭터 프롬프트 {n}": "Character prompt {n}",
+    "인물 없음": "No character",
     "아직 생성된 이미지가 없습니다.": "No images yet.",
     "생성 {n} · 시드 {seed}": "Take {n} · seed {seed}",
 
@@ -244,7 +246,7 @@
     "이름 변경": "Rename",
     // ── 백엔드가 준 상태 글 ──
     "스토리와 캐릭터 설정 구성 중": "Building the story and character sheet",
-    "{n}/{total}페이지 컷과 위치 프롬프트 구성 중": "Laying out panels and positions for page {n}/{total}",
+    "{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중": "Laying out panels and character prompts for page {n}/{total}",
     "기획을 마쳤습니다. 요청한 페이지를 생성하는 중": "Planning done; generating the requested pages",
     "기획이 준비되었습니다.": "The plan is ready.",
     "요청한 페이지를 모두 생성했습니다.": "Generated every requested page.",
@@ -447,7 +449,9 @@
     "실제 NAI 프롬프트": "実際のNAIプロンプト",
     "베이스 프롬프트": "ベースプロンプト",
     "네거티브 프롬프트": "ネガティブプロンプト",
-    "위치 프롬프트 {n} ({x}, {y})": "位置プロンプト{n} ({x}, {y})",
+    "캐릭터 프롬프트 {n} ({x}, {y})": "キャラクタープロンプト{n} ({x}, {y})",
+    "캐릭터 프롬프트 {n}": "キャラクタープロンプト{n}",
+    "인물 없음": "人物なし",
     "아직 생성된 이미지가 없습니다.": "まだ生成された画像がありません。",
     "생성 {n} · 시드 {seed}": "生成{n} · シード{seed}",
 
@@ -492,7 +496,7 @@
     "이름 변경": "名前を変更",
     // ── バックエンドからの状態文 ──
     "스토리와 캐릭터 설정 구성 중": "ストーリーとキャラクター設定を構成中",
-    "{n}/{total}페이지 컷과 위치 프롬프트 구성 중": "{n}/{total}ページのコマと位置プロンプトを構成中",
+    "{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중": "{n}/{total}ページのコマとキャラクタープロンプトを構成中",
     "기획을 마쳤습니다. 요청한 페이지를 생성하는 중": "企画が終わり、要求されたページを生成中",
     "기획이 준비되었습니다.": "企画ができました。",
     "요청한 페이지를 모두 생성했습니다.": "要求されたページをすべて生成しました。",
