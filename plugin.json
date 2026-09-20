@@ -7,9 +7,9 @@
   },
   "version": "1.5.0",
   "description": {
-    "ko": "짧은 줄거리를 LLM 이 페이지와 컷으로 나누고, NAI V5 캐릭터 프롬프트로 만화를 생성합니다.",
-    "en": "An LLM splits a short story into pages and panels, then generates the manga with positioned NAI V5 character prompts.",
-    "ja": "短いあらすじを LLM がページとコマに分け、NAI V5 のキャラクタープロンプトに位置を指定してマンガを生成します。"
+    "ko": "간단한 스토리 입력으로 LLM이 자동으로 콘티 및 만화 생성.",
+    "en": "Enter a simple story and an LLM generates the board and the manga.",
+    "ja": "簡単なストーリーを入力すると、LLM がネームとマンガを自動生成。"
   },
   "homepage": "https://github.com/mrm987/peropix-plugin-manga-maker",
   "server": "server.py",
