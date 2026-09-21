@@ -118,7 +118,25 @@ try {
   $('workspace').value='QA';$('example').click();const exampleStory=$('story').value;$('plan').click();$('plan').click();
   await wait(()=>w.qa.get()?.status==='planning','planning activity');
   assert.equal($('activitySpinner').hidden,false);
+  /* ★생성 중에도 괜찮은 것은 잠그지 않는다 (사용자 지시 2026-09-21). 셋으로 갈린다: 생성 조건은
+     언제나 열고, 콘티를 짤 때 읽는 값은 생성 중에만 열고, 돌고 있는 작업이 지금 쓰는 것만 잠근다. */
+  assert.equal($('style').disabled,false,'화풍은 돌고 있는 동안에도 고른다');
+  assert.equal($('stylePrompt').disabled,false);assert.equal($('negativePrompt').disabled,false);
+  assert.equal($('model').disabled,false);assert.equal($('seed').disabled,false);assert.equal($('steps').disabled,false);
+  assert.equal($('stylePicker').disabled,false,'저장해 둔 화풍도 고른다');
+  assert.equal($('story').disabled,false,'다음에 그릴 내용은 돌고 있는 동안에도 적는다');
+  assert.equal($('pageCount').disabled,false);
+  assert.equal($('maxPanels').disabled,true,'컷 수는 콘티를 짤 때 읽는 값이라 기획 중에는 잠근다');
+  assert.equal($('layoutMode').disabled,true);
+  assert.equal($('direction').disabled,true);assert.equal($('dialogue').disabled,true);
+  assert.equal($('workspace').disabled,true);assert.equal($('account').disabled,true);
+  assert.equal($('llmProvider').disabled,true);
+  assert.equal($('plan').disabled,true,'콘티 버튼은 겹쳐 누를 수 없다');assert.equal($('automatic').disabled,true);
+  input($('cfgRescale'),'0.5','change');
+  await wait(()=>calls.some(([u,o])=>u.endsWith('/live')&&o?.method==='PUT'),'돌고 있는 동안에는 좁은 창구로 저장한다');
   await wait(()=>w.qa.get()?.status==='ready','plan');
+  assert.equal(w.qa.get().options.cfg_rescale,0.5,'기획 중에 바꾼 생성 옵션이 작업의 저장에 안 덮인다');
+  input($('cfgRescale'),'0.42','change');
   assert.equal($('activitySpinner').hidden,true);
   assert.equal(calls.filter(([u,o])=>u.endsWith('/projects')&&o?.method==='POST').length,1,'double click must not create duplicate paid tasks');
   assert.equal(w.document.querySelectorAll('[data-cut]').length,5,'컷마다 번호 칩 하나');
@@ -126,6 +144,16 @@ try {
   assert.equal(w.document.querySelectorAll('[data-marker]').length,5);
   assert.equal($('story').disabled,false);
   assert.equal($('pageCount').disabled,false);
+  // 생성 중에는 콘티를 읽기만 하므로 페이지 편집과 컷 수까지 연다. 작업을 새로 거는 버튼만 잠근 채다.
+  w.qa.get().status='generating';w.qa.render();
+  assert.equal(w.document.querySelector('[data-page-field="title"]').disabled,false,'생성 중에는 페이지 편집을 연다');
+  assert.equal(w.document.querySelector('[data-char-field="prompt"]').disabled,false,'공통 캐릭터 설정도 연다');
+  assert.equal($('maxPanels').disabled,false);assert.equal($('layoutMode').disabled,false);
+  assert.equal($('deletePage').disabled,true,'페이지 삭제는 생성 중에도 잠근다');
+  assert.equal($('replanPage').disabled,true,'다시 기획도 잠근다');
+  assert.equal($('direction').disabled,true,'읽는 방향은 콘티와 어긋나므로 잠근 채다');
+  w.qa.get().status='ready';w.qa.render();
+  assert.equal(w.document.querySelector('[data-page-field="title"]').disabled,false);
   // ★사용자 지시 2026-09-20: 콘티를 만들어도 적어 둔 글은 남는다. 그리고 그 뒤로는 이어서 그리는 칸이다.
   assert.equal($('story').value,exampleStory,'콘티를 만들어도 적어 둔 글은 남는다');
   assert.equal($('story').placeholder,'이어서 그릴 내용 (비워도 됩니다)');

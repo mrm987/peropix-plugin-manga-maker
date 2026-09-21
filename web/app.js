@@ -21,6 +21,21 @@ const generationFields={model:'model',steps:'steps',cfg:'cfg',cfg_rescale:'cfgRe
 const generationLabels={model:'모델',steps:'스텝',cfg:'CFG',cfg_rescale:'리스케일',sampler:'샘플러',seed:'시드'};
 const busy = () => requesting || (doc && busyStates.includes(doc.status));
 const optionIds = ['maxPanels','layoutMode','style','direction','dialogue','size','width','height','stylePrompt','negativePrompt','model','steps','cfg','cfgRescale','sampler','seed','workspace','account'];
+// ★생성 조건은 작업이 시작할 때 읽어 굳으므로, 돌고 있는 동안 바꾸어도 진행 중인 것은 흔들리지
+//   않고 다음에 거는 생성부터 반영된다 (사용자 지시 2026-09-21). 서버도 같은 목록으로 거른다
+//   (`server.py` 의 `LIVE_OPTIONS`).
+const liveOptionIds = ['style','stylePrompt','negativePrompt','model','size','width','height','steps','cfg','cfgRescale','sampler','seed'];
+// ★콘티를 짤 때 읽는 값이라 기획 중에는 잠근다 (`server.py` 의 `GENERATING_OPTIONS`).
+const genOptionIds = ['maxPanels','layoutMode'];
+// 돌고 있는 작업이 있는가. `requesting` 은 화면이 요청을 보내 둔 상태라 이것과 다르다.
+const taskRunning = () => !!doc && busyStates.includes(doc.status);
+// ★페이지 편집을 열어도 되는가. 기획 중에는 잠근다 — 콘티를 짜는 작업이 앞 페이지들을 읽어 다음
+//   페이지를 쓰기 때문에, 그 사이에 앞 페이지를 고치면 고치다 만 상태가 다음 페이지에 섞여 든다.
+//   생성 중에는 콘티를 읽기만 하므로 열어 둔다.
+const canEdit = () => !requesting && (!taskRunning() || doc.status === 'generating');
+// ★사람이 들어가 있는 칸은 새로 그리면 지워진다 — 옵션 칸은 `putOptions` 가 값을 덮고, 편집창은
+//   `renderEditor` 가 통째로 다시 그린다. 그 둘에 커서가 있는 동안에는 새로 그리지 않는다.
+const inField = () => {const el=document.activeElement; return !!el && (optionIds.includes(el.id) || !!el.closest('.editor'));};
 
 function saveView(){try{localStorage.setItem('manga-maker-view',JSON.stringify(viewPrefs));}catch{}}
 function updateWidthLabel(){
@@ -208,7 +223,7 @@ function putOptions(o) {
 }
 function draft() { try { localStorage.setItem('manga-maker-draft', JSON.stringify({story:$('story').value, options:options()})); } catch {} }
 function markDirty() {
-  if (!doc?.outline || busy()) return;
+  if (!doc || (!doc.outline && !taskRunning())) return;
   dirty = true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => persist().catch(error), 900);
@@ -216,10 +231,15 @@ function markDirty() {
 async function persist() {
   clearTimeout(saveTimer);
   if (saving) await saving;
-  if (!dirty || !doc?.outline) return;
-  const current = doc, payload = {revision:doc.revision, options:options(), outline:doc.outline, pages:doc.pages.map(p => p.plan)};
+  if (!dirty || !doc || (!doc.outline && !taskRunning())) return;
+  // ★작업이 도는 동안에는 좁은 창구로 보낸다. 보통 창구는 작업 중이면 409 로 막고, 막지 않더라도
+  //   작업이 프로젝트를 메모리에 들고 있어서 다음에 저장할 때 통째로 덮어쓴다. 판 번호도 안 보낸다
+  //   — 작업이 저장할 때마다 올려서 대조하면 언제나 어긋난다.
+  const current = doc, live = taskRunning(), plans = doc.pages.map(p => p.plan);
+  const payload = live ? (doc.status==='generating' ? {options:options(), outline:doc.outline, pages:plans} : {options:options()})
+                       : {revision:doc.revision, options:options(), outline:doc.outline, pages:plans};
   dirty = false;
-  saving = api(`projects/${doc.id}`, 'PUT', payload).then(result => {
+  saving = api(`projects/${doc.id}${live ? '/live' : ''}`, 'PUT', payload).then(result => {
     if (doc === current) {
       doc.revision = result.revision;
       doc.options = result.options;
@@ -248,18 +268,22 @@ function adopt(p) {
   render();
 }
 function controls() {
-  const b = !!busy();
-  for (const id of optionIds) $(id).disabled = b;
+  // ★잠금은 세 갈래다 (사용자 지시 2026-09-21). 생성 조건과 화풍은 언제나 열고, 콘티는 생성 중에만
+  //   열고, 돌고 있는 작업이 지금 쓰고 있는 것만 잠근 채로 둔다.
+  const b = !!busy(), r = requesting, ed = canEdit();
+  for (const id of optionIds) $(id).disabled = liveOptionIds.includes(id) ? r : genOptionIds.includes(id) ? !ed : b;
   for (const id of ['llmProvider','llmRefresh']) $(id).disabled = b || !config;
   $('llmModel').disabled = b || !$('llmProvider').value;
   $('llmEffort').disabled = b || !$('llmProvider').value;
-  $('styleImage').disabled=b || !config;
-  $('stylePicker').disabled=b || !stylesReady;
-  $('refreshStyles').disabled=b || !config;
-  for(const el of $('styleList').querySelectorAll('button,input'))el.disabled=b;
-  $('saveStyle').disabled=b || !stylesReady || !$('stylePrompt').value.trim();
+  $('styleImage').disabled=r || !config;
+  $('stylePicker').disabled=r || !stylesReady;
+  $('refreshStyles').disabled=r || !config;
+  for(const el of $('styleList').querySelectorAll('button,input'))el.disabled=r;
+  $('saveStyle').disabled=r || !stylesReady || !$('stylePrompt').value.trim();
   $('translateDialogue').disabled=b || !doc?.pages.length || $('dialogue').value==='none';
-  for (const id of ['story','pageCount','plan','automatic','example']) $(id).disabled = b || !config;
+  // 적어 두는 칸은 언제나 열어 둔다. 그것으로 시작하는 버튼 둘만 잠근다.
+  for (const id of ['story','pageCount','example']) $(id).disabled = r || !config;
+  for (const id of ['plan','automatic']) $(id).disabled = b || !config;
   $('new').disabled = requesting;
   $('projects').disabled = requesting;
   $('stop').hidden = !b || requesting;
@@ -278,7 +302,7 @@ function controls() {
   $('generateAll').textContent = planning ? T(doc.gen_follow ? '기획되는 대로 생성 중' : '기획되는 대로 생성') : T('남은 {n}페이지 생성',{n:doc?.pages.filter(p => !p.images.length).length || 0});
   // 40페이지가 차면 더 이어서 그릴 수 없다 (서버 상한과 같은 값).
   if (doc?.outline && doc.outline.pages.length >= 40) for (const id of ['plan','automatic']) $(id).disabled = true;
-  for (const input of document.querySelectorAll('.editor input,.editor textarea,.editor select,.editor button')) input.disabled = b;
+  for (const input of document.querySelectorAll('.editor input,.editor textarea,.editor select,.editor button')) input.disabled = !ed;
   if (doc?.pages.length) {
     // ★한도는 여기서만 건다 — 바로 위 줄이 편집창의 `disabled` 를 통째로 다시 칠한다.
     const panels=doc.pages[selected].plan.panels;
@@ -289,7 +313,9 @@ function controls() {
       button.disabled ||= panel.subjects.length >= 4 || panel.subjects.length >= doc.outline.characters.length;
     }
   }
+  // ★편집창 안이지만 이 둘은 작업을 새로 거는 버튼이라, 생성 중에도 잠근 채로 둔다.
   if ($('deletePage')) $('deletePage').disabled = b || !doc || doc.outline.pages.length <= 1;
+  if ($('replanPage')) $('replanPage').disabled = b;
   updateActivity();
 }
 function render() {
@@ -526,7 +552,7 @@ function renderPrompts() {
 
 document.querySelector('.editor').addEventListener('input', e => {
   const el=e.target;
-  if (busy()) return;
+  if (!canEdit()) return;
   if(el.id==='replanInstructions'){replanDirections.set(`${doc.id}:${selected}`,el.value);return;}
   const panelIndex = Number(el.closest('[data-panel]')?.dataset.panel), pg = doc.pages[selected].plan;
   if (el.dataset.pageField) {
@@ -569,6 +595,7 @@ document.querySelector('.editor').addEventListener('input', e => {
 });
 document.querySelector('.editor').addEventListener('click', e => {
   if(e.target.closest('#replanPage')) {
+    if(busy()) return;
     const instructions=$('replanInstructions').value;
     perform(async()=>{await saveLlm();adopt(await api(`projects/${doc.id}/replan`,'POST',{revision:doc.revision,page:selected,instructions}));},'페이지 재기획 준비','replanPage');
     return;
@@ -584,18 +611,18 @@ document.querySelector('.editor').addEventListener('click', e => {
     return;
   }
   const cut=e.target.closest('[data-cut]');
-  if (cut && !busy()) {
+  if (cut && canEdit()) {
     panelOpen.set(`${doc.id}:${selected}`,+cut.dataset.cut);
     renderEditor(); renderBoard(); controls(); return;
   }
   const region=e.target.closest('[data-region-toggle]');
-  if (region && !busy()) {
+  if (region && canEdit()) {
     const key=`${doc.id}:${selected}:${region.dataset.regionToggle}`;
     regionOpen.has(key) ? regionOpen.delete(key) : regionOpen.add(key);
     renderEditor(); controls(); return;
   }
   const dropSubject=e.target.closest('[data-remove-subject]');
-  if (dropSubject && !busy()) {
+  if (dropSubject && canEdit()) {
     const panel=doc.pages[selected].plan.panels[+dropSubject.closest('[data-panel]').dataset.panel], at=+dropSubject.dataset.removeSubject;
     const who=panel.subjects[at].character, spoken=panel.dialogue.filter(d=>d.speaker===who).length;
     void (async()=>{
@@ -610,7 +637,7 @@ document.querySelector('.editor').addEventListener('click', e => {
   }
   const addSubject=e.target.closest('[data-add-subject]'), add=e.target.closest('[data-add-line]');
   const addNote=e.target.closest('[data-add-note]'), remove=e.target.closest('[data-remove-line]');
-  if (busy() || (!addSubject && !add && !addNote && !remove)) return;
+  if (!canEdit() || (!addSubject && !add && !addNote && !remove)) return;
   if (addSubject) {
     const panel=doc.pages[selected].plan.panels[+addSubject.dataset.addSubject], taken=new Set(panel.subjects.map(s=>s.character));
     const spare=doc.outline.characters.find(c=>!taken.has(c.id));
@@ -640,11 +667,11 @@ document.querySelector('.editor').addEventListener('click', e => {
   markDirty(); renderEditor(); renderBoard(); controls();
 });
 document.querySelector('.editor').addEventListener('change',e=>{
-  if(e.target.dataset.regionField && !busy()){renderEditor();renderBoard();controls();}
+  if(e.target.dataset.regionField && canEdit()){renderEditor();renderBoard();controls();}
 });
 $('board').addEventListener('pointerdown', e => {
   const marker=e.target.closest('[data-marker]');
-  if (!marker || busy()) return;
+  if (!marker || !canEdit()) return;
   e.preventDefault();
   const [pi,kind,at]=marker.dataset.marker.split(','), svg=marker.ownerSVGElement;
   const [x,y,w,h]=boxes()[+pi], panel=doc.pages[selected].plan.panels[+pi], frame=doc.pages[selected].plan.layout==='free'?panel.region.frame:'rectangle';
@@ -753,9 +780,12 @@ async function init() {
   await listProjects();render();
   try{await listStyles();}catch(e){error(e);$('refreshStyles').disabled=false;}
   setInterval(async()=>{
-    if (!doc || !busyStates.includes(doc.status) || requesting || saving || dirty) return;
+    // ★사람이 고치고 있는 동안에는 쉰다 (`inField`). 생성 중에는 편집이 열려 있어서, 새로 그리면
+    //   치던 글과 커서가 사라진다. 손을 떼면 다음 회차가 바로 따라잡는다.
+    if (!doc || !busyStates.includes(doc.status) || requesting || saving || dirty || inField()) return;
     const id=doc.id;
-    try{const next=await api(`projects/${id}`);if(doc?.id!==id)return;if(next.revision>doc.revision){adopt(next);if(!busyStates.includes(next.status))await listProjects();}else if(next.revision===doc.revision){doc.queue_state=next.queue_state;updateActivity();}}
+    // 보내 놓은 사이에 사람이 고쳤으면 그 고친 것이 먼저다 — 받은 것으로 덮지 않는다.
+    try{const next=await api(`projects/${id}`);if(doc?.id!==id || dirty || saving)return;if(next.revision>doc.revision){adopt(next);if(!busyStates.includes(next.status))await listProjects();}else if(next.revision===doc.revision){doc.queue_state=next.queue_state;updateActivity();}}
     catch(e){error(e);}
   },1500);
 }
@@ -826,9 +856,9 @@ async function applyStyleData(data){
   $('styleRefName').textContent=referenceName ? T('참고 이미지: {name}',{name:referenceName}) : '';
   $('styleRefPreview').hidden=true;
   if(referencePreviewUrl){URL.revokeObjectURL(referencePreviewUrl);referencePreviewUrl='';}
-  draft();if(doc?.outline){dirty=true;await persist();renderBoard();}
+  draft();if(doc){dirty=true;await persist();renderBoard();}
 }
-$('stylePicker').onclick=()=>{if(!busy()&&stylesReady)openStyleList($('styleList').hidden);};
+$('stylePicker').onclick=()=>{if(!requesting&&stylesReady)openStyleList($('styleList').hidden);};
 // ★`isConnected` 를 먼저 본다 — 목록을 다시 그리면 눌린 버튼이 문서에서 떨어져 나가고,
 //   그 상태의 closest() 는 언제나 null 이라 방금 연 목록이 그대로 닫혔다 (2026-09-15).
 document.addEventListener('click',e=>{if(!$('styleList').hidden&&e.target.isConnected&&!e.target.closest('.style-picker'))openStyleList(false);});
@@ -839,7 +869,7 @@ $('styleList').addEventListener('keydown',e=>{
   if(e.key==='Escape'){e.stopPropagation();renamingStyle='';renderStyles();}
 });
 $('styleList').addEventListener('click',e=>{
-  if(busy())return;
+  if(requesting)return;
   const pick=e.target.closest('[data-pick]'), rename=e.target.closest('[data-rename]'),
         ok=e.target.closest('[data-rename-ok]'), cancel=e.target.closest('[data-rename-cancel]'),
         remove=e.target.closest('[data-delete]');
@@ -881,7 +911,7 @@ function openStyleName(open){
   }
 }
 $('styleNameOk').innerHTML=styleIcons.check;$('styleNameCancel').innerHTML=styleIcons.cross;
-$('saveStyle').onclick=()=>{if(!busy())openStyleName(true);};
+$('saveStyle').onclick=()=>{if(!requesting)openStyleName(true);};
 $('styleNameCancel').onclick=()=>openStyleName(false);
 $('styleName').addEventListener('keydown',e=>{
   if(e.key==='Enter'){e.preventDefault();$('styleNameOk').click();}
@@ -900,7 +930,7 @@ for(const event of ['input','change'])$('stylePrompt').addEventListener(event,()
   controls();
 });
 async function importStyle(file) {
-  if(!file || busy())return;
+  if(!file || requesting)return;
   await perform(async()=>{
     await saveLlm();
     $('styleRefName').textContent=T('원본 프롬프트에서 화풍 추출 중…');

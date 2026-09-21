@@ -1007,6 +1007,66 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.json()['status'],'paused');self.assertEqual(len(r.json()['pages'][1]['images']),1)
         self.assertEqual(len(self.host.submissions),2)
 
+    async def waiting_on(self,pid,status):
+        """작업이 그 상태로 들어가고 프로젝트를 메모리에 들 때까지 기다린다."""
+        for _ in range(300):
+            p=mod.load(pid)
+            if p['status']==status and pid in mod.LIVE:return p
+            await asyncio.sleep(.02)
+        self.fail(f'작업이 {status} 로 들어가지 않았다')
+
+    async def test_live_edit_runs_beside_the_task_and_stays_narrow(self):
+        """돌고 있는 작업 곁에서 고친 것이 그 작업의 다음 저장에 안 덮인다 (사용자 지시 2026-09-21).
+
+        보통 창구(`PUT /api/projects/{pid}`)는 작업 중이면 409 다. 막지 않더라도 작업이 프로젝트를
+        메모리에 들고 있어서, 파일만 고치면 작업이 다음에 저장할 때 통째로 덮어쓴다. 좁은 창구는
+        그 객체를 직접 고치고, 바꿀 수 있는 칸만 골라 덮는다."""
+        self.llm_delay=.5
+        pid=await self.create()
+        url=f'/plug/manga-maker/api/projects/{pid}/live'
+        base=(await self.waiting_on(pid,'planning'))['options']
+        r=await self.client.put(url,json={'options':{**base,'style':'color','steps':40,'max_panels':6,'workspace':'없는곳','dialogue':'en'}})
+        self.assertEqual(r.status_code,200,r.text)
+        got=r.json()['options']
+        self.assertEqual((got['style'],got['steps']),('color',40),'화풍과 생성 옵션은 기획 중에도 바꾼다')
+        self.assertEqual((got['workspace'],got['dialogue']),(base['workspace'],base['dialogue']),'작업이 쓰고 있는 칸은 안 바뀐다')
+        self.assertEqual(got['max_panels'],base['max_panels'],'컷 수는 콘티를 짤 때 읽는 값이라 기획 중에는 안 바뀐다')
+        r=await self.client.put(url,json={'options':base,'outline':OUTLINE,'pages':[PAGE]})
+        self.assertEqual(r.status_code,409,'기획 중에는 콘티를 못 고친다')
+        r=await self.client.put(f'/plug/manga-maker/api/projects/{pid}',json={'revision':1,'options':base,'outline':OUTLINE,'pages':[PAGE]})
+        self.assertEqual(r.status_code,409,'보통 창구는 그대로 막힌 채다')
+        p=await self.finish(pid)
+        self.assertEqual((p['options']['style'],p['options']['steps']),('color',40),'작업이 저장을 이어 가도 안 덮인다')
+
+        # 생성 중에는 콘티를 읽기만 하므로 페이지와 컷 수까지 연다.
+        self.host.delay=.4
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':p['revision']})
+        self.assertEqual(r.status_code,200,r.text)
+        live=await self.waiting_on(pid,'generating')
+        edited=copy.deepcopy(live['pages'][0]['plan']);edited['title']='고친 제목'
+        r=await self.client.put(url,json={'options':{**live['options'],'max_panels':6},'outline':live['outline'],
+                                          'pages':[edited]+[x['plan'] for x in live['pages'][1:]]})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()['options']['max_panels'],6,'생성 중에는 페이지당 최대 컷도 열린다')
+        p=await self.finish(pid)
+        self.assertEqual(p['pages'][0]['plan']['title'],'고친 제목')
+        self.assertEqual((p['options']['max_panels'],p['options']['style']),(6,'color'))
+        self.assertEqual([len(x['images']) for x in p['pages']],[1,1],'고치는 동안에도 생성은 끝까지 간다')
+
+    async def test_stop_keeps_options_changed_while_running(self):
+        """멈춤은 만들다 만 기획을 되돌리는 것이지 설정을 되돌리는 것이 아니다 (사용자 지시 2026-09-21)."""
+        self.llm_delay=.5
+        pid=await self.create()
+        base=(await self.waiting_on(pid,'planning'))['options']
+        r=await self.client.put(f'/plug/manga-maker/api/projects/{pid}/live',json={'options':{**base,'style':'color','seed':7}})
+        self.assertEqual(r.status_code,200,r.text)
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/stop')
+        self.assertEqual(r.status_code,200,r.text)
+        stopped=r.json()
+        self.assertEqual(stopped['status'],'paused')
+        self.assertEqual((stopped['options']['style'],stopped['options']['seed']),('color',7))
+        self.assertEqual(mod.load(pid)['options']['style'],'color')
+
     async def test_short_and_cut_storyboards_keep_what_arrived(self):
         # ★★온 만큼은 받는다 (사용자 지시 2026-09-21). 다시 묻는 것은 처음부터 다시 출력시키는 일이라,
         #   덜 왔다고 버리면 이미 만들어 둔 페이지까지 함께 날아간다.

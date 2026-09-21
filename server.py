@@ -22,9 +22,21 @@ from .core import DIRECTOR, DEFAULT_NEGATIVE, LAYOUTS, MAX_PAGES, Beat, Model, O
 router = APIRouter()
 DATA = Path(__file__).parent / "_data" / "projects"
 TASKS: dict[str, asyncio.Task] = {}
-# Live project dict of a running plan_work, so /generate can queue planned pages while later pages
-# are still being storyboarded. The planning task and its generation servicer share this one object.
+# Live project dict of the running task. Whoever holds this object owns the file: its next save()
+# writes the whole thing back, so an edit made anywhere else is lost. Two readers need it, and every
+# work function therefore registers here: /generate queues planned pages while later pages are still
+# being storyboarded, and /live edits options without waiting for the task to finish.
 LIVE: dict[str, dict] = {}
+# 돌고 있는 작업 중에도 바꿀 수 있는 옵션이다 (사용자 지시 2026-09-21). 생성 조건은 작업이 시작할 때
+# 읽어 굳으므로, 지금 바꾸어도 진행 중인 것은 흔들리지 않고 다음에 거는 생성부터 반영된다.
+# 화면도 같은 목록으로 잠금을 푼다 (`web/app.js` 의 `liveOptionIds`).
+LIVE_OPTIONS = {"style", "style_prompt", "reference_style", "reference_name", "negative_prompt",
+                "model", "width", "height", "steps", "cfg", "cfg_rescale", "sampler", "seed"}
+# 콘티를 짤 때 읽는 값이라 기획 중에는 못 바꾼다. 생성 중에는 콘티를 읽기만 하므로 열어 둔다.
+GENERATING_OPTIONS = {"max_panels", "layout_mode"}
+# 두 목록에 없는 것은 돌고 있는 작업이 지금 쓰고 있다: 읽는 방향과 대사 언어는 콘티를 짜는 값이라
+# 중간에 바꾸면 이미 짜인 페이지와 어긋나고, 저장할 워크스페이스와 NAI 계정은 작업이 시작할 때
+# 고정해 끝까지 그것으로 보낸다.
 # Transient planning-time keys. Never part of a checkpoint, so stop/restore cannot resurrect them.
 TRANSIENT = {"checkpoint", "accepting", "gen_requests", "gen_follow", "generation"}
 # ★★콘티 한 벌은 답이 길다 (실측 2026-09-21: 6페이지 31,606토큰, 8페이지면 4만 토큰쯤).
@@ -226,6 +238,11 @@ def spawn(pid: str, work):
     def done(t):
         if TASKS.get(pid) is t:
             TASKS.pop(pid, None)
+        # 작업이 끝나면 메모리에 들고 있던 프로젝트도 놓는다. 취소로 끝나면 work 안의 정리 코드가
+        # 안 돌 수 있어서, 무슨 일이 있어도 도는 이 자리에서 치운다. 그 사이 새 작업이 시작됐으면
+        # LIVE 에 든 것은 그쪽 것이므로 두고 나온다.
+        if not running(pid):
+            LIVE.pop(pid, None)
         if not t.cancelled():
             t.exception()  # work records errors; consume unexpected task errors too.
     task.add_done_callback(done)
@@ -490,11 +507,11 @@ async def plan_work(pid: str, automatic: bool):
         if not servicer.done():
             servicer.cancel()
         await asyncio.gather(servicer, return_exceptions=True)
-        LIVE.pop(pid, None)
 
 
 async def continue_work(pid: str, pages: int, instructions: str, automatic: bool):
     p = load(pid)
+    LIVE[pid] = p
     try:
         opts = Options.model_validate(p["options"])
         settings = resolve_llm()
@@ -523,6 +540,7 @@ def creative_options(opts):
 
 async def replan_work(pid: str, index: int, instructions: str = ""):
     p = load(pid)
+    LIVE[pid] = p
     try:
         opts, outline = Options.model_validate(p["options"]), Outline.model_validate(p["outline"])
         settings = resolve_llm()
@@ -601,6 +619,7 @@ async def generate_one(p: dict, pid: str, index: int, app, account: str):
 
 async def generate_work(pid: str, indices: list[int]):
     p = load(pid)
+    LIVE[pid] = p
     try:
         app = host_app()
         opts = Options.model_validate(p["options"])
@@ -634,6 +653,13 @@ class EditProject(Model):
     options: Options
     outline: Outline
     pages: list[Page] = Field(max_length=MAX_PAGES)
+
+
+class LiveEdit(Model):
+    options: Options
+    # 콘티는 생성 중에만 함께 보낸다. 공통 캐릭터 설정이 밑그림에 있어서 둘이 한 벌로 온다.
+    outline: Outline | None = None
+    pages: list[Page] | None = Field(default=None, max_length=MAX_PAGES)
 
 
 class Generate(Model):
@@ -825,6 +851,7 @@ class Translate(Model):
 
 async def translate_work(pid: str):
     p = load(pid)
+    LIVE[pid] = p
     try:
         opts, outline = Options.model_validate(p["options"]), Outline.model_validate(p["outline"])
         settings = resolve_llm()
@@ -958,6 +985,47 @@ async def edit(pid: str, body: EditProject):
     p["options"], p["outline"] = body.options.model_dump(), body.outline.model_dump()
     for old, new in zip(p["pages"], body.pages):
         old["plan"] = new.model_dump()
+    save(p)
+    return view(p)
+
+
+@router.put("/api/projects/{pid}/live")
+async def edit_live(pid: str, body: LiveEdit):
+    """Edit while a task runs. Narrow on purpose: only what the running task no longer reads.
+
+    돌고 있는 작업이 프로젝트를 메모리에 들고 있으므로 그 객체를 직접 고친다. 파일만 고치면 작업이
+    다음에 저장할 때 통째로 덮어써서 고친 것이 사라진다.
+
+    판 번호는 대조하지 않는다. 돌고 있는 작업이 저장할 때마다 판 번호를 올려서 대조하면 언제나
+    409 가 된다. 대신 바꿀 수 있는 칸을 서버가 골라 덮으므로 나머지는 건드려지지 않는다.
+    """
+    p = LIVE.get(pid) if running(pid) else None
+    if p is None:
+        # 작업이 방금 끝났다. 이제 파일이 기준이므로 그대로 고쳐 저장한다.
+        p = load(pid)
+    generating = p.get("status") == "generating"
+    allowed = LIVE_OPTIONS | GENERATING_OPTIONS if generating else LIVE_OPTIONS
+    incoming = body.options.model_dump()
+    options = Options.model_validate({**p["options"], **{k: v for k, v in incoming.items() if k in allowed}})
+    outline = p.get("outline")
+    if body.pages is not None:
+        if not generating:
+            raise HTTPException(409, "기획 중에는 콘티를 고칠 수 없습니다. 기획이 끝난 뒤에 고쳐 주세요.")
+        if body.outline is None or len(body.outline.pages) != len(p["outline"]["pages"]):
+            raise HTTPException(400, "페이지 수를 바꾸려면 새 기획을 만들어 주세요.")
+        if len(body.pages) != len(p["pages"]):
+            raise HTTPException(400, "페이지 수를 바꾸려면 새 기획을 만들어 주세요.")
+        try:
+            for page in body.pages:
+                validate_page(page, body.outline, options)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        outline = body.outline.model_dump()
+        for old, new in zip(p["pages"], body.pages):
+            old["plan"] = new.model_dump()
+    p["options"] = options.model_dump()
+    if outline is not None:
+        p["outline"] = outline
     save(p)
     return view(p)
 
@@ -1102,7 +1170,14 @@ async def stop(pid: str):
             if matches(lane.current_job):
                 lane.cancel_current_job()
                 inflight = True
+    kept, replacing = p["options"], bool(p.get("replacement"))
     p = restore(p)
+    # 멈춤은 작업이 만들다 만 기획을 되돌리는 것이지 설정을 되돌리는 것이 아니다. 돌고 있는 동안
+    # 바꾼 화풍이나 생성 옵션이 멈춤과 함께 사라지지 않게 한다 (사용자 지시 2026-09-21).
+    # ★전체 재기획을 멈추는 것만 예외다 — 그때는 이야기를 통째로 바꾼 것을 무르는 것이라,
+    #   그 이야기와 함께 보낸 설정도 바꾸기 전으로 돌아가야 한다.
+    if not replacing:
+        p["options"] = kept
     p["status"], p["message"] = "paused", "즉시 중단했습니다. 작성 중이던 변경을 버리고 시작 전 기획으로 되돌렸습니다."
     if inflight:
         p["message"] += " 이미 NAI에 전송된 이미지는 회수할 수 없어 저장 폴더에 남을 수 있지만 현재 만화에는 반영하지 않습니다."
