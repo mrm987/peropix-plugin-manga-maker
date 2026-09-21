@@ -176,6 +176,18 @@ class Page(Model):
         return self
 
 
+class Storyboard(Model):
+    """★★한 번의 요청으로 받는 **이번 기획의 모든 페이지**.
+
+    예전에는 페이지마다 따로 물었다. 매 호출이 새 대화라 지시문·스키마·이야기·캐릭터 설정·앞
+    페이지를 처음부터 다시 따졌고, 그 되풀이되는 생각이 시간을 거의 다 먹었다
+    (실측 2026-09-21, opus xhigh 6페이지: 한 장씩 17.1분 · 출력 72,486토큰,
+     한 번에 6.4분 · 출력 31,606토큰. 시간은 출력 토큰 수에 그대로 비례했다).
+    ★8장인 이유: 처음 기획이 8페이지까지(`outline_check`)이고 이어 그리기도 한 번에 8페이지까지
+      (`Extension`)라, 한 번의 기획이 이보다 많은 페이지를 만들 수 없다."""
+    pages: list[Page] = Field(min_length=1, max_length=8)
+
+
 def rects(layout: str, direction: str) -> list:
     """템플릿의 칸을 읽는 순서로 돌려준다.
 

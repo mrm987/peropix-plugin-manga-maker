@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import Field, field_validator
 
-from .core import DIRECTOR, DEFAULT_NEGATIVE, LAYOUTS, MAX_PAGES, Beat, Model, Options, Outline, Page, compile_page, parse_json, validate_page, validate_planned_page, reference_generation
+from .core import DIRECTOR, DEFAULT_NEGATIVE, LAYOUTS, MAX_PAGES, Beat, Model, Options, Outline, Page, Storyboard, compile_page, parse_json, validate_page, validate_planned_page, reference_generation
 
 router = APIRouter()
 DATA = Path(__file__).parent / "_data" / "projects"
@@ -27,6 +27,11 @@ TASKS: dict[str, asyncio.Task] = {}
 LIVE: dict[str, dict] = {}
 # Transient planning-time keys. Never part of a checkpoint, so stop/restore cannot resurrect them.
 TRANSIENT = {"checkpoint", "accepting", "gen_requests", "gen_follow", "generation"}
+# ★★콘티 한 벌은 답이 길다 (실측 2026-09-21: 6페이지 31,606토큰, 8페이지면 4만 토큰쯤).
+#   앤트로픽 직결 API 만 `max_tokens` 를 요구해서 앱이 기본 32,000을 넣는데, 그 값이면 잘린다
+#   (`backend/llm.py` 의 `_anthropic`). 나머지 경로는 이 값을 안 보내므로 영향이 없다.
+#   ★넉넉히 주고 안 쓰면 그만인 값이다 — 페이지 수로 계산하면 모델마다 한도가 달라 또 추측이 된다.
+PLAN_TOKENS = 64000
 WRITERS = weakref.WeakKeyDictionary()
 BUSY = {"planning", "generating", "stopping"}
 
@@ -272,7 +277,7 @@ async def recover(p: dict):
     save(p)
 
 
-async def ask(schema, content: dict, check=None, settings=None, instructions=None):
+async def ask(schema, content: dict, check=None, settings=None, instructions=None, max_tokens=None):
     import llm
     settings = settings if settings is not None else resolve_llm()
     system = (instructions or DIRECTOR) + "\nJSON schema:\n" + json.dumps(schema.model_json_schema(), ensure_ascii=False)
@@ -283,6 +288,10 @@ async def ask(schema, content: dict, check=None, settings=None, instructions=Non
         if settings.get("engine") == "cli":
             from . import cli_llm
             result = await cli_llm.chat(settings, system, messages, DATA.parent / "cli")
+        elif max_tokens:
+            # ★값이 있을 때만 넘긴다 — `llm.chat` 은 안 보내는 것이 기본이고, 여기서 늘 넘기면
+            #   상한을 걸 이유가 없는 호출(번역·재기획)까지 값을 지고 간다.
+            result = await llm.chat(settings, system, messages, None, max_tokens)
         else:
             result = await llm.chat(settings, system, messages)
         ensure_active()
@@ -322,6 +331,16 @@ def extension_check(ext: Extension, requested: int, existing: int):
         raise ValueError(f"정확히 {requested}페이지를 이어서 구성해야 합니다.")
     if existing + len(ext.pages) > MAX_PAGES:
         raise ValueError(f"페이지는 모두 {MAX_PAGES}장까지입니다.")
+
+
+def storyboard_check(board: Storyboard, outline: Outline, opts: Options, requested: int):
+    """★부족하게 와도 받지 않는다. 덜 온 채로 이어 붙이면 어느 비트가 빠졌는지 알 수 없다.
+    여기서 걸리면 `ask` 가 한 번 고쳐 묻고, 그래도 안 되면 이미 짜인 페이지는 그대로 남아
+    「콘티만」으로 남은 페이지부터 다시 이어 갈 수 있다 (`resume_plan`)."""
+    if len(board.pages) != requested:
+        raise ValueError(f"{requested}페이지를 한 번에 구성해야 하는데 {len(board.pages)}페이지가 왔습니다.")
+    for page in board.pages:
+        validate_planned_page(page, outline, opts)
 
 
 async def service_generation(p: dict, pid: str, planning_done: asyncio.Event):
@@ -384,17 +403,27 @@ async def plan_work(pid: str, automatic: bool):
             p["outline"] = outline.model_dump()
             save(p)
         outline = Outline.model_validate(p["outline"])
-        for index in range(len(p["pages"]), len(outline.pages)):
-            p["message"] = f"{index+1}/{len(outline.pages)}페이지 컷과 캐릭터 프롬프트 구성 중"
-            progress(p, "storyboard", index, len(outline.pages), index)
+        # ★★남은 페이지를 **한 번에** 묻는다 (사용자 결정 2026-09-21). 페이지마다 따로 물으면 매 호출이
+        #   새 대화라 지시문·스키마·이야기·캐릭터 설정을 처음부터 다시 따지고, 그 되풀이가 시간을
+        #   거의 다 먹었다 (`core.Storyboard` 의 실측). ★`page` 를 None 으로 두어 화면이 「현재 N페이지」를
+        #   말하지 않게 한다 — 한 번에 전부 짜는 중이라 가리킬 페이지가 없다.
+        done = len(p["pages"])
+        if done < len(outline.pages):
+            requested = len(outline.pages) - done
+            p["message"] = f"{requested}페이지 컷과 캐릭터 프롬프트 구성 중"
+            progress(p, "storyboard", done, len(outline.pages), None)
             save(p)
-            page = await ask(Page, {
-                "task": "Storyboard only the requested page. Match the narrative beat and maintain continuity with previous pages. Do not repeat events already shown.",
-                "story": p["story"], "outline": outline.model_dump(), "page_number": index+1,
+            board = await ask(Storyboard, {
+                "task": "Storyboard every remaining page in one response, in order, starting at first_page_number. "
+                        "Give each page the narrative beat the outline assigns it, continue from the pages before it, "
+                        "and do not repeat events already shown.",
+                "story": p["story"], "outline": outline.model_dump(),
+                "first_page_number": done+1, "page_count": requested,
                 "previous_pages": [x["plan"] for x in p["pages"]], "options": creative_options(opts),
-            }, lambda x: validate_planned_page(x, outline, opts), settings=settings)
-            p["pages"].append({"plan": page.model_dump(), "images": [], "error": ""})
-            progress(p, "storyboard", index+1, len(outline.pages), index)
+            }, lambda x: storyboard_check(x, outline, opts, requested), settings=settings, max_tokens=PLAN_TOKENS)
+            for page in board.pages:
+                p["pages"].append({"plan": page.model_dump(), "images": [], "error": ""})
+            progress(p, "storyboard", len(p["pages"]), len(outline.pages), None)
             save(p)
         if p.get("replacement") and (p["checkpoint"].get("outline") or p["checkpoint"].get("pages")):
             previous = copy.deepcopy(p["checkpoint"])

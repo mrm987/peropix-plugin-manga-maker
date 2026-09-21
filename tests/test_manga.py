@@ -501,7 +501,20 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         if 'Continue the story' in request['task']:
             self.continuations.append({'requested':request['requested_pages'],'instructions':request['continuation_instructions'],'existing':len(request['existing_pages'])})
             return {'text':json.dumps({'pages':(OUTLINE['pages']*4)[:request['requested_pages'] or 2]},ensure_ascii=False)}
-        return {'text':json.dumps(outline if 'Create a complete story' in request['task'] else page,ensure_ascii=False)}
+        if 'Create a complete story' in request['task']:
+            return {'text':json.dumps(outline,ensure_ascii=False)}
+        # 콘티는 남은 페이지를 한 번에 받는다. 재기획(Re-storyboard)만 여전히 한 장이다.
+        if 'Storyboard every remaining page' in request['task']:
+            return {'text':json.dumps({'pages':[copy.deepcopy(page) for _ in range(request['page_count'])]},ensure_ascii=False)}
+        return {'text':json.dumps(page,ensure_ascii=False)}
+
+    async def accepting(self,pid):
+        """기획 작업이 「이미 나온 페이지는 지금 생성해도 된다」를 켜 둔 순간까지 기다린다."""
+        for _ in range(400):
+            p=(await self.client.get(f'/plug/manga-maker/api/projects/{pid}')).json()
+            if p.get('accepting') or p['status'] not in ('planning','generating'):return p
+            await asyncio.sleep(.02)
+        return p
 
     async def planned(self,pid,count):
         for _ in range(200):
@@ -511,26 +524,34 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.fail('planning did not reach the requested page')
 
     async def test_generate_planned_pages_while_planning_continues(self):
+        # ★콘티를 남은 페이지 한 번에 받게 되면서(2026-09-21) 「짜는 동안 이미 나온 페이지를 생성」이
+        #   살아 있는 자리는 이어 그리기다. 앞 페이지가 이미 있는 채로 뒤 페이지를 짜기 때문이다.
+        #   처음 기획은 페이지가 한꺼번에 나오므로 겹치는 구간이 없다.
         self.llm_delay=.4
-        pid=await self.create();p=await self.planned(pid,1)
-        self.assertEqual((p['status'],p['accepting'],len(p['pages'])),('planning',True,1))
-        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':p['revision'],'page':1})
-        self.assertEqual(r.status_code,400)
+        pid=await self.create();p=await self.finish(pid)
+        self.assertEqual(len(p['pages']),2)
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/continue',json={'revision':p['revision'],'pages':2})
+        self.assertEqual(r.status_code,200,r.text)
+        p=await self.accepting(pid)
+        self.assertEqual((p['status'],p['accepting'],len(p['pages'])),('planning',True,2))
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':p['revision'],'page':3})
+        self.assertEqual(r.status_code,400,'아직 짜이지 않은 페이지는 걸 수 없다')
         r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':p['revision'],'page':0})
         self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['gen_requests'],[0])
         r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':0,'page':0})
         self.assertEqual(r.status_code,400)
         p=await self.finish(pid)
-        self.assertEqual((p['status'],len(p['pages']),len(p['pages'][0]['images']),p['pages'][1]['images']),('ready',2,1,[]))
+        self.assertEqual((p['status'],len(p['pages']),len(p['pages'][0]['images'])),('ready',4,1))
         self.assertFalse(p['accepting']);self.assertEqual(p['gen_requests'],[]);self.assertIsNone(p['generation'])
         self.assertEqual(len(self.host.submissions),1)
-        # "남은 페이지 생성" during planning follows every page as it is storyboarded.
-        pid=await self.create();p=await self.planned(pid,1)
+        # "남은 페이지 생성" during planning follows every page that has no image yet.
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/continue',json={'revision':p['revision'],'pages':2})
+        self.assertEqual(r.status_code,200,r.text)
+        p=await self.accepting(pid)
         r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/generate',json={'revision':p['revision']})
         self.assertEqual(r.status_code,200,r.text);self.assertTrue(r.json()['gen_follow'])
         p=await self.finish(pid)
-        self.assertEqual((p['status'],[len(x['images']) for x in p['pages']]),('complete',[1,1]))
-        self.assertEqual(len(self.host.submissions),3)
+        self.assertEqual((p['status'],[len(x['images']) for x in p['pages']]),('complete',[1]*6))
 
     async def test_delete_page_keeps_files_and_allows_continuation(self):
         pid=await self.create();p=await self.finish(pid)
@@ -610,7 +631,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(cli_llm,'chat',new=AsyncMock(side_effect=self.chat)) as run:
             pid=await self.create();p=await self.finish(pid)
             self.assertEqual(p['status'],'ready',p['message'])
-            self.assertEqual(run.await_count,3)
+            self.assertEqual(run.await_count,2)   # 밑그림 한 번 + 콘티 한 번 (두 페이지를 한 요청으로)
             self.assertEqual(run.await_args.args[0]['agent'],'codex')
             self.assertEqual(run.await_args.args[0]['model'],'fixture-codex')
             self.assertEqual(run.await_args.args[0]['effort'],'medium')
@@ -824,16 +845,18 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.host.store.file_path('QA',first).exists())
 
     async def test_stop_rolls_back_partial_initial_plan(self):
+        # 콘티를 한 번에 받으므로 멈출 수 있는 중간 지점은 「밑그림은 나왔고 콘티는 아직」이다.
         waiting=asyncio.Event();calls=0
-        async def partial(settings,system,messages):
+        async def partial(settings,system,messages,*args):
             nonlocal calls
             calls+=1
-            if calls==3:
+            if calls==2:
                 waiting.set();await asyncio.Event().wait()
-            return await self.chat(settings,system,messages)
+            return await self.chat(settings,system,messages,*args)
         with patch.object(llm,'chat',new=AsyncMock(side_effect=partial)):
             pid=await self.create();await asyncio.wait_for(waiting.wait(),2)
-            self.assertEqual(len(mod.load(pid)['pages']),1)
+            saved=mod.load(pid)
+            self.assertEqual(len(saved['pages']),0);self.assertIsNotNone(saved['outline'])
             old_task=mod.TASKS[pid]
             r=await asyncio.wait_for(self.client.post(f'/plug/manga-maker/api/projects/{pid}/stop',json={}),.2)
             self.assertEqual(r.json()['pages'],[])
@@ -984,10 +1007,26 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.json()['status'],'paused');self.assertEqual(len(r.json()['pages'][1]['images']),1)
         self.assertEqual(len(self.host.submissions),2)
 
-    async def test_bad_llm_json_correction_and_missing_destination(self):
-        llm.chat.side_effect=[{'text':'not json'},{'text':json.dumps(OUTLINE)},{'text':json.dumps(PAGE)},{'text':json.dumps(PAGE)}]
+    async def test_storyboard_must_return_every_requested_page(self):
+        # ★덜 온 콘티를 그냥 받으면 어느 비트가 빠졌는지 알 수 없다. 한 번 고쳐 묻고, 그래도 부족하면 오류다.
+        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE]})},{'text':json.dumps({'pages':[PAGE,PAGE]})}]
         pid=await self.create();p=await self.finish(pid)
-        self.assertEqual(p['status'],'ready');self.assertEqual(llm.chat.await_count,4)
+        self.assertEqual((p['status'],len(p['pages'])),('ready',2),p['message'])
+        self.assertEqual(llm.chat.await_count,3)
+        # ★콘티 요청만 출력 상한을 실어 보낸다 — 앤트로픽 직결의 기본 32,000이면 8페이지가 잘린다.
+        board=next(c for c in llm.chat.await_args_list if 'Storyboard every remaining page' in json.loads(c.args[2][0]['content'])['task'])
+        self.assertEqual(board.args[4],mod.PLAN_TOKENS)
+        self.assertEqual(len(llm.chat.await_args_list[0].args),3,'밑그림 요청에는 상한을 안 싣는다')
+        llm.chat.reset_mock()
+        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE]})},{'text':json.dumps({'pages':[PAGE]})}]
+        pid=await self.create();p=await self.finish(pid)
+        self.assertEqual(p['status'],'error');self.assertIn('2페이지를 한 번에',p['message'])
+
+    async def test_bad_llm_json_correction_and_missing_destination(self):
+        # 밑그림이 한 번 깨져 고쳐 묻고, 콘티 두 장은 한 번의 요청으로 받는다.
+        llm.chat.side_effect=[{'text':'not json'},{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE,PAGE]})}]
+        pid=await self.create();p=await self.finish(pid)
+        self.assertEqual(p['status'],'ready');self.assertEqual(llm.chat.await_count,3)
         # A prose refusal twice in a row: the error shows the model's own words.
         llm.chat.side_effect=[{'text':'죄송하지만 그 내용은 도와드릴 수 없습니다.'},{'text':'죄송하지만 그 내용은 도와드릴 수 없습니다.'}]
         pid=await self.create();p=await self.finish(pid)

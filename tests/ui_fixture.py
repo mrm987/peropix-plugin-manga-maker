@@ -37,6 +37,10 @@ async def fake_chat(settings, system, messages, *args):
     page=copy.deepcopy(FREE_PAGE if req['options'].get('layout_mode')=='free' else PAGE)
     if 'Re-storyboard' in req['task']:
         page['panels'] += [copy.deepcopy(page['panels'][-1]) for _ in range(2)]
+        return {'text': json.dumps(page, ensure_ascii=False)}
+    # 콘티는 남은 페이지를 한 번에 받는다.
+    if 'Storyboard every remaining page' in req['task']:
+        return {'text': json.dumps({'pages':[copy.deepcopy(page) for _ in range(req['page_count'])]}, ensure_ascii=False)}
     return {'text': json.dumps(page, ensure_ascii=False)}
 
 
