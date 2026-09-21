@@ -10,6 +10,8 @@ let referenceName='', referencePreviewUrl='';
 let savedStyles=[], stylesReady=false, modelRows=[], modelsBy={};
 let selectedStyle='', renamingStyle='';   // 목록에서 고른 화풍, 이름을 고치는 중인 화풍
 let activeOperation=null;
+// 진행 표시만 새로 그린 뒤라 통째로 따라잡아야 하는 상태. `refreshProgress` 를 보라.
+let behind=false;
 const replanDirections=new Map();
 const regionOpen=new Set();   // 「영역」을 펼쳐 둔 컷 (프로젝트:페이지:컷)
 const panelOpen=new Map();    // 펴 둔 컷의 번호 (프로젝트:페이지 → 0부터)
@@ -255,6 +257,16 @@ async function listProjects() {
   $('projects').innerHTML = `<option value="">${T('새 만화')}</option>` + result.items.map(p => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join('');
   $('projects').value = doc?.id || '';
 }
+/* ★사람이 칸에 들어가 있는 동안 쓰는 길이다. 진행 표시가 읽는 것만 옮겨 오고 콘티·옵션·페이지는
+   건드리지 않는다 — 통째로 다시 그리면 편집창이 새로 만들어지고 옵션 칸의 값이 덮여, 치던 글과
+   커서가 사라진다 (사용자 지시 2026-09-21).
+   ★판 번호는 옮긴다 — 그대로 두면 사람이 고친 것을 보낼 때 옛 번호가 실려 409 로 튕긴다. 대신
+   `behind` 가 「아직 통째로는 못 따라잡았다」를 들고 있다가, 손을 떼는 순간 통째로 받아 오게 한다. */
+function refreshProgress(next) {
+  for (const key of ['status','message','progress','generation','gen_requests','gen_follow','queue_state','accepting','updated','revision']) doc[key]=next[key];
+  behind = true;
+  renderNav(); controls();
+}
 function adopt(p) {
   const switched = doc?.id !== p.id;
   // ★적어 둔 「이번에 그릴 내용」은 여기서 지우지 않는다 (사용자 지시 2026-09-20). 프로젝트를 새로
@@ -262,7 +274,7 @@ function adopt(p) {
   //   복원해 둔 초안을 이 줄이 덮어썼다. 비우는 자리는 「새 만화」와 위의 프로젝트 고르개 둘뿐이다.
   if(switched)$('importedOptions').hidden=true;
   if(doc?.id===p.id && (p.pages[selected]?.images.length || 0)>(doc.pages[selected]?.images.length || 0))mode='image';
-  doc = p; dirty = false; selected = Math.min(selected, Math.max(0, p.pages.length-1));
+  doc = p; dirty = false; behind = false; selected = Math.min(selected, Math.max(0, p.pages.length-1));
   putOptions(p.options);
   try { localStorage.setItem('manga-maker-current', p.id); } catch {}
   render();
@@ -318,8 +330,7 @@ function controls() {
   if ($('replanPage')) $('replanPage').disabled = b;
   updateActivity();
 }
-function render() {
-  $('projectTitle').textContent = doc?.outline?.title || (doc ? T('새 이야기 기획 중') : T('새 만화'));
+function renderNav() {
   const queuedPages=doc?.gen_requests || [], generatingPage=doc?.generation?.page;
   const planned = doc?.pages || [];
   $('pageNav').innerHTML = planned.map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${T('{n}컷',{n:p.plan.panels.length})} · ${p.error ? T('확인 필요') : generatingPage===i ? T('생성 중') : queuedPages.includes(i) ? T('생성 대기') : p.images.length ? T('생성 {n}장',{n:p.images.length}) : T('기획 완료')}</small></span></button>`).join('')
@@ -329,6 +340,10 @@ function render() {
         const i = planned.length + k;
         return `<div class="page-tab is-missing"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(beat.title)}<small>${T('출력 중단')}</small></span><button class="icon-btn" data-missing-remove="${i}" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${styleIcons.trash}</button></div>`;
       }).join('');
+}
+function render() {
+  $('projectTitle').textContent = doc?.outline?.title || (doc ? T('새 이야기 기획 중') : T('새 만화'));
+  renderNav();
   const has = !!doc?.pages.length;
   $('empty').hidden = has; $('content').hidden = !has;
   if (has) { renderEditor(); renderBible(); renderBoard(); renderResult(); renderPrompts(); }
@@ -780,12 +795,13 @@ async function init() {
   await listProjects();render();
   try{await listStyles();}catch(e){error(e);$('refreshStyles').disabled=false;}
   setInterval(async()=>{
-    // ★사람이 고치고 있는 동안에는 쉰다 (`inField`). 생성 중에는 편집이 열려 있어서, 새로 그리면
-    //   치던 글과 커서가 사라진다. 손을 떼면 다음 회차가 바로 따라잡는다.
-    if (!doc || !busyStates.includes(doc.status) || requesting || saving || dirty || inField()) return;
+    if (!doc || (!busyStates.includes(doc.status) && !behind) || requesting || saving || dirty) return;
     const id=doc.id;
     // 보내 놓은 사이에 사람이 고쳤으면 그 고친 것이 먼저다 — 받은 것으로 덮지 않는다.
-    try{const next=await api(`projects/${id}`);if(doc?.id!==id || dirty || saving)return;if(next.revision>doc.revision){adopt(next);if(!busyStates.includes(next.status))await listProjects();}else if(next.revision===doc.revision){doc.queue_state=next.queue_state;updateActivity();}}
+    try{const next=await api(`projects/${id}`);if(doc?.id!==id || dirty || saving)return;
+      if(inField()){refreshProgress(next);updateActivity();return;}
+      const catchUp=behind;behind=false;
+      if(catchUp || next.revision>doc.revision){adopt(next);if(!busyStates.includes(next.status))await listProjects();}else if(next.revision===doc.revision){doc.queue_state=next.queue_state;updateActivity();}}
     catch(e){error(e);}
   },1500);
 }

@@ -134,8 +134,14 @@ try {
   assert.equal($('plan').disabled,true,'콘티 버튼은 겹쳐 누를 수 없다');assert.equal($('automatic').disabled,true);
   input($('cfgRescale'),'0.5','change');
   await wait(()=>calls.some(([u,o])=>u.endsWith('/live')&&o?.method==='PUT'),'돌고 있는 동안에는 좁은 창구로 저장한다');
-  await wait(()=>w.qa.get()?.status==='ready','plan');
+  /* ★칸에 커서가 있어도 진행 표시는 따라온다 (사용자 지시 2026-09-21). 전체를 다시 그리는 것만
+     미루고 회차 자체는 이어 가므로, 치던 글은 남고 상태는 계속 올라온다. */
+  $('stylePrompt').focus();$('stylePrompt').value='치는 중인 글';
+  await wait(()=>w.qa.get()?.status==='ready','칸에 들어가 있어도 상태는 따라온다');
+  assert.equal($('stylePrompt').value,'치는 중인 글','새로 그리느라 치던 글을 지우지 않는다');
   assert.equal(w.qa.get().options.cfg_rescale,0.5,'기획 중에 바꾼 생성 옵션이 작업의 저장에 안 덮인다');
+  $('stylePrompt').blur();
+  await wait(()=>$('stylePrompt').value!=='치는 중인 글','칸에서 손을 떼면 통째로 따라잡는다');
   input($('cfgRescale'),'0.42','change');
   assert.equal($('activitySpinner').hidden,true);
   assert.equal(calls.filter(([u,o])=>u.endsWith('/projects')&&o?.method==='POST').length,1,'double click must not create duplicate paid tasks');
