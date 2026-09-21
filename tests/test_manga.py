@@ -1007,20 +1007,28 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.json()['status'],'paused');self.assertEqual(len(r.json()['pages'][1]['images']),1)
         self.assertEqual(len(self.host.submissions),2)
 
-    async def test_storyboard_must_return_every_requested_page(self):
-        # ★덜 온 콘티를 그냥 받으면 어느 비트가 빠졌는지 알 수 없다. 한 번 고쳐 묻고, 그래도 부족하면 오류다.
-        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE]})},{'text':json.dumps({'pages':[PAGE,PAGE]})}]
+    async def test_short_and_cut_storyboards_keep_what_arrived(self):
+        # ★★온 만큼은 받는다 (사용자 지시 2026-09-21). 다시 묻는 것은 처음부터 다시 출력시키는 일이라,
+        #   덜 왔다고 버리면 이미 만들어 둔 페이지까지 함께 날아간다.
+        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE]})}]
         pid=await self.create();p=await self.finish(pid)
-        self.assertEqual((p['status'],len(p['pages'])),('ready',2),p['message'])
-        self.assertEqual(llm.chat.await_count,3)
-        # ★콘티 요청만 출력 상한을 실어 보낸다 — 앤트로픽 직결의 기본 32,000이면 8페이지가 잘린다.
+        self.assertEqual((p['status'],len(p['pages']),len(p['outline']['pages'])),('paused',1,2),p['message'])
+        self.assertIn('출력이 중간에 끊겼습니다',p['message'])
+        self.assertEqual(llm.chat.await_count,2,'덜 왔다고 고쳐 묻지 않는다')
+        # ★콘티 요청에만 출력 상한을 싣는다 — 앤트로픽 직결의 기본 32,000이면 8페이지가 잘린다.
         board=next(c for c in llm.chat.await_args_list if 'Storyboard every remaining page' in json.loads(c.args[2][0]['content'])['task'])
         self.assertEqual(board.args[4],mod.PLAN_TOKENS)
         self.assertEqual(len(llm.chat.await_args_list[0].args),3,'밑그림 요청에는 상한을 안 싣는다')
+        # 끝이 잘려 통째로는 못 읽는 응답에서도 완결된 페이지는 건진다.
         llm.chat.reset_mock()
-        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE]})},{'text':json.dumps({'pages':[PAGE]})}]
+        llm.chat.side_effect=[{'text':json.dumps(OUTLINE)},{'text':json.dumps({'pages':[PAGE,PAGE]})[:-30]}]
         pid=await self.create();p=await self.finish(pid)
-        self.assertEqual(p['status'],'error');self.assertIn('2페이지를 한 번에',p['message'])
+        self.assertEqual((p['status'],len(p['pages'])),('paused',1),p['message'])
+        self.assertEqual(llm.chat.await_count,2,'건질 것이 있으면 고쳐 묻지 않는다')
+        # 못 받은 페이지는 밑그림에서 지운다 — 지울 컷도 이미지도 없다.
+        r=await self.client.post(f'/plug/manga-maker/api/projects/{pid}/pages/1/delete',json={'revision':p['revision']})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual((r.json()['status'],len(r.json()['pages']),len(r.json()['outline']['pages'])),('ready',1,1))
 
     async def test_bad_llm_json_correction_and_missing_destination(self):
         # 밑그림이 한 번 깨져 고쳐 묻고, 콘티 두 장은 한 번의 요청으로 받는다.

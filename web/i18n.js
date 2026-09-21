@@ -252,7 +252,10 @@
     "이름 변경": "Rename",
     // ── 백엔드가 준 상태 글 ──
     "스토리와 캐릭터 설정 구성 중": "Building the story and character sheet",
-    "{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중": "Laying out panels and character prompts for page {n}/{total}",
+    "{n}페이지 컷과 캐릭터 프롬프트 구성 중": "Laying out panels and character prompts for {n} pages",
+    "출력이 중간에 끊겼습니다. {n}페이지부터 구성되지 않았습니다.": "The output was cut off. Nothing was written from page {n} on.",
+    "출력 중단": "Cut off",
+    "밑그림에서 이 페이지를 빼고 뒤 페이지의 번호가 당겨집니다.": "Drops this page from the outline; the pages after it move up.",
     "기획을 마쳤습니다. 요청한 페이지를 생성하는 중": "Planning done; generating the requested pages",
     "기획이 준비되었습니다.": "The plan is ready.",
     "요청한 페이지를 모두 생성했습니다.": "Generated every requested page.",
@@ -508,7 +511,10 @@
     "이름 변경": "名前を変更",
     // ── バックエンドからの状態文 ──
     "스토리와 캐릭터 설정 구성 중": "ストーリーとキャラクター設定を構成中",
-    "{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중": "{n}/{total}ページのコマとキャラクタープロンプトを構成中",
+    "{n}페이지 컷과 캐릭터 프롬프트 구성 중": "{n}ページのコマとキャラクタープロンプトを構成中",
+    "출력이 중간에 끊겼습니다. {n}페이지부터 구성되지 않았습니다.": "出力が途中で切れました。{n}ページ目から構成されていません。",
+    "출력 중단": "出力中断",
+    "밑그림에서 이 페이지를 빼고 뒤 페이지의 번호가 당겨집니다.": "ネームからこのページを外し、後のページ番号が繰り上がります。",
     "기획을 마쳤습니다. 요청한 페이지를 생성하는 중": "企画が終わり、要求されたページを生成中",
     "기획이 준비되었습니다.": "企画ができました。",
     "요청한 페이지를 모두 생성했습니다.": "要求されたページをすべて生成しました。",

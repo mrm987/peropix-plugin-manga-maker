@@ -38,9 +38,12 @@ async def fake_chat(settings, system, messages, *args):
     if 'Re-storyboard' in req['task']:
         page['panels'] += [copy.deepcopy(page['panels'][-1]) for _ in range(2)]
         return {'text': json.dumps(page, ensure_ascii=False)}
-    # 콘티는 남은 페이지를 한 번에 받는다.
+    # 콘티는 남은 페이지를 한 번에 받는다. 이야기에 「출력끊김」이 있으면 한 장 모자라게 돌려준다.
     if 'Storyboard every remaining page' in req['task']:
-        return {'text': json.dumps({'pages':[copy.deepcopy(page) for _ in range(req['page_count'])]}, ensure_ascii=False)}
+        count = req['page_count']
+        if '출력끊김' in (req.get('story') or ''):
+            count = max(1, count-1)
+        return {'text': json.dumps({'pages':[copy.deepcopy(page) for _ in range(count)]}, ensure_ascii=False)}
     return {'text': json.dumps(page, ensure_ascii=False)}
 
 

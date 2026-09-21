@@ -290,6 +290,37 @@ def parse_json(text: str) -> dict:
     return result
 
 
+def salvage_pages(text: str) -> list[dict]:
+    """★끊긴 콘티 응답에서 **완결된 페이지만** 건져낸다.
+
+    콘티 한 벌은 JSON 문서 하나라, 마지막 페이지를 쓰다 끊기면 바깥 괄호가 안 닫혀 `parse_json`
+    이 통째로 못 읽는다. 그러면 다 만들어 둔 앞 페이지까지 함께 버려진다 (사용자 지적 2026-09-21).
+    여기서는 `pages` 배열을 앞에서부터 한 객체씩 떼어 내, 끝까지 닫힌 것만 돌려준다.
+    ★고쳐 묻지 않는다 — 무엇이 끊겼는지 사용자가 보고 정한다."""
+    start = text.find('"pages"')
+    if start < 0:
+        return []
+    at = text.find("[", start)
+    if at < 0:
+        return []
+    decoder = json.JSONDecoder()
+    out: list[dict] = []
+    at += 1
+    while at < len(text):
+        while at < len(text) and text[at] in ", \t\r\n":
+            at += 1
+        if at >= len(text) or text[at] != "{":
+            break
+        try:
+            obj, at = decoder.raw_decode(text, at)
+        except ValueError:
+            break
+        if not isinstance(obj, dict):
+            break
+        out.append(obj)
+    return out
+
+
 def validate_page(page: Page, outline: Outline, options: Options) -> Page:
     ids = {c.id for c in outline.characters}
     slots = 0

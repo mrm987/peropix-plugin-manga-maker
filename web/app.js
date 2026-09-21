@@ -77,7 +77,8 @@ function updateActivity(){
 /* ★★**백엔드가 준 상태 글도 옮긴다.** 그 글은 한국어로 오고 `_data` 에 그대로 저장되므로,
      본을 맞춰 화면에서 옮긴다. 아는 본이 없으면(오류 원문 등) 그대로 보여 준다. */
 const SERVER_MSGS=[
-  [/^(\d+)\/(\d+)페이지 컷과 캐릭터 프롬프트 구성 중$/,'{n}/{total}페이지 컷과 캐릭터 프롬프트 구성 중'],
+  [/^(\d+)페이지 컷과 캐릭터 프롬프트 구성 중$/,'{n}페이지 컷과 캐릭터 프롬프트 구성 중'],
+  [/^출력이 중간에 끊겼습니다\. (\d+)페이지부터 구성되지 않았습니다\.$/,'출력이 중간에 끊겼습니다. {n}페이지부터 구성되지 않았습니다.'],
   [/^(\d+)\/(\d+)페이지 생성 중$/,'{n}/{total}페이지 생성 중'],
   [/^(\d+)\/(\d+)페이지 대사 번역 중$/,'{n}/{total}페이지 대사 번역 중'],
   [/^(\d+)페이지를 다시 기획했습니다\. 이전 콘티와 이미지는 보관되어 있습니다\.$/,'{n}페이지를 다시 기획했습니다. 이전 콘티와 이미지는 보관되어 있습니다.'],
@@ -294,7 +295,14 @@ function controls() {
 function render() {
   $('projectTitle').textContent = doc?.outline?.title || (doc ? T('새 이야기 기획 중') : T('새 만화'));
   const queuedPages=doc?.gen_requests || [], generatingPage=doc?.generation?.page;
-  $('pageNav').innerHTML = (doc?.pages || []).map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${T('{n}컷',{n:p.plan.panels.length})} · ${p.error ? T('확인 필요') : generatingPage===i ? T('생성 중') : queuedPages.includes(i) ? T('생성 대기') : p.images.length ? T('생성 {n}장',{n:p.images.length}) : T('기획 완료')}</small></span></button>`).join('');
+  const planned = doc?.pages || [];
+  $('pageNav').innerHTML = planned.map((p,i) => `<button class="page-tab" data-page="${i}" aria-current="${i === selected}"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(p.plan.title)}<small>${T('{n}컷',{n:p.plan.panels.length})} · ${p.error ? T('확인 필요') : generatingPage===i ? T('생성 중') : queuedPages.includes(i) ? T('생성 대기') : p.images.length ? T('생성 {n}장',{n:p.images.length}) : T('기획 완료')}</small></span></button>`).join('')
+    // ★출력이 끊겨 콘티가 안 온 페이지 (사용자 지시 2026-09-21). 밑그림에는 있고 컷이 없다.
+    //   지우거나 「콘티만」으로 이어 짤 수 있게 자리만 세워 둔다.
+    + (doc?.outline?.pages || []).slice(planned.length).map((beat,k) => {
+        const i = planned.length + k;
+        return `<div class="page-tab is-missing"><b>${String(i+1).padStart(2,'0')}</b><span>${esc(beat.title)}<small>${T('출력 중단')}</small></span><button class="icon-btn" data-missing-remove="${i}" title="${T('이 페이지 삭제')}" aria-label="${T('이 페이지 삭제')}">${styleIcons.trash}</button></div>`;
+      }).join('');
   const has = !!doc?.pages.length;
   $('empty').hidden = has; $('content').hidden = !has;
   if (has) { renderEditor(); renderBible(); renderBoard(); renderResult(); renderPrompts(); }
@@ -655,7 +663,19 @@ $('board').addEventListener('pointerdown', e => {
   const end = () => {svg.removeEventListener('pointermove',move);svg.removeEventListener('pointerup',end);svg.removeEventListener('pointercancel',end);markDirty();renderEditor();renderBoard();controls();};
   svg.setPointerCapture(e.pointerId);svg.addEventListener('pointermove',move);svg.addEventListener('pointerup',end);svg.addEventListener('pointercancel',end);
 });
-$('pageNav').onclick = async e => { const tab=e.target.closest('[data-page]');if (!tab)return;try{await persist();selected=+tab.dataset.page;render();}catch(e){error(e);} };
+$('pageNav').onclick = async e => {
+  // ★출력이 끊겨 콘티가 안 온 페이지를 지운다 — 밑그림에서만 빼면 되고 지울 컷도 이미지도 없다
+  const missing=e.target.closest('[data-missing-remove]');
+  if (missing) {
+    if (busy()) return;
+    const page=+missing.dataset.missingRemove;
+    if (!await confirmAsk({title:T('{n}페이지를 지울까요?',{n:page+1}),body:T('밑그림에서 이 페이지를 빼고 뒤 페이지의 번호가 당겨집니다.'),ok:T('삭제'),danger:true})) return;
+    perform(async()=>{adopt(await api(`projects/${doc.id}/pages/${page}/delete`,'POST',{revision:doc.revision}));},'페이지 삭제','deletePage');
+    return;
+  }
+  const tab=e.target.closest('[data-page]');if (!tab)return;
+  try{await persist();selected=+tab.dataset.page;render();}catch(e){error(e);}
+};
 $('boardMode').onclick=()=>setMode('board');$('imageMode').onclick=()=>setMode('image');
 for (const id of optionIds) $(id).addEventListener('change',()=>{
   if(id==='size' && $('size').value!=='custom'){const [w,h]=$('size').value.split(',');$('width').value=w;$('height').value=h;}

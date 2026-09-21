@@ -190,6 +190,10 @@ button { justify-content: center; white-space: nowrap; }
 .page-tab b { font-size: var(--text-md); color: var(--accent-ink); }
 .page-tab span { overflow: hidden; text-overflow: ellipsis; }
 .page-tab small { display: block; margin-top: 3px; color: var(--ink-dim); }
+/* ★출력이 끊겨 콘티가 안 온 페이지. 자리는 세우되 고를 수 없다는 것이 보여야 한다 */
+.page-tab.is-missing { border: 1px dashed var(--line); border-radius: var(--r-3); background: none; color: var(--ink-dim); }
+.page-tab.is-missing b { color: var(--ink-dim); }
+.page-tab.is-missing > .icon-btn { flex: 0 0 auto; margin-left: auto; }
 .page-tab.is-working { border-color: var(--accent); box-shadow: inset 0 -3px var(--accent); }
 .page-tab.is-working b { animation: activity-pulse 1.2s ease-in-out infinite; }
 

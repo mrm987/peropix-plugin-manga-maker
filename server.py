@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import Field, field_validator
 
-from .core import DIRECTOR, DEFAULT_NEGATIVE, LAYOUTS, MAX_PAGES, Beat, Model, Options, Outline, Page, Storyboard, compile_page, parse_json, validate_page, validate_planned_page, reference_generation
+from .core import DIRECTOR, DEFAULT_NEGATIVE, LAYOUTS, MAX_PAGES, Beat, Model, Options, Outline, Page, Storyboard, compile_page, parse_json, salvage_pages, validate_page, validate_planned_page, reference_generation
 
 router = APIRouter()
 DATA = Path(__file__).parent / "_data" / "projects"
@@ -277,7 +277,7 @@ async def recover(p: dict):
     save(p)
 
 
-async def ask(schema, content: dict, check=None, settings=None, instructions=None, max_tokens=None):
+async def ask(schema, content: dict, check=None, settings=None, instructions=None, max_tokens=None, salvage=None):
     import llm
     settings = settings if settings is not None else resolve_llm()
     system = (instructions or DIRECTOR) + "\nJSON schema:\n" + json.dumps(schema.model_json_schema(), ensure_ascii=False)
@@ -304,6 +304,11 @@ async def ask(schema, content: dict, check=None, settings=None, instructions=Non
                 check(parsed)
             return parsed
         except (ValueError, TypeError) as exc:
+            # ★★끊긴 답에서 건질 것이 있으면 **고쳐 묻지 않고 그대로 돌려준다** (사용자 지시 2026-09-21).
+            #   다시 묻는 것은 처음부터 다시 출력시키는 일이라, 이미 온 페이지를 버리고 같은 값을 또 치른다.
+            kept = salvage(text) if salvage else None
+            if kept is not None:
+                return kept
             if attempt:
                 # Show what the model actually sent: a prose refusal and a broken object look the
                 # same from the parser's side, and the user could not tell them apart (2026-09-15).
@@ -334,13 +339,34 @@ def extension_check(ext: Extension, requested: int, existing: int):
 
 
 def storyboard_check(board: Storyboard, outline: Outline, opts: Options, requested: int):
-    """★부족하게 와도 받지 않는다. 덜 온 채로 이어 붙이면 어느 비트가 빠졌는지 알 수 없다.
-    여기서 걸리면 `ask` 가 한 번 고쳐 묻고, 그래도 안 되면 이미 짜인 페이지는 그대로 남아
-    「콘티만」으로 남은 페이지부터 다시 이어 갈 수 있다 (`resume_plan`)."""
-    if len(board.pages) != requested:
-        raise ValueError(f"{requested}페이지를 한 번에 구성해야 하는데 {len(board.pages)}페이지가 왔습니다.")
+    """★★**온 만큼은 받는다** (사용자 지시 2026-09-21). 덜 왔다고 통째로 버리면 다 만들어 둔 앞
+    페이지까지 함께 날아가고, 다시 묻는 것은 처음부터 다시 출력시키는 일이다. 모자란 만큼은
+    화면이 「출력 중단」으로 보여 주고 지울지 이어 짤지 사용자가 정한다."""
+    if not 1 <= len(board.pages) <= requested:
+        raise ValueError(f"{requested}페이지까지 구성해야 하는데 {len(board.pages)}페이지가 왔습니다.")
     for page in board.pages:
         validate_planned_page(page, outline, opts)
+
+
+def cut_short(p: dict) -> str | None:
+    """콘티가 밑그림보다 모자라면 알릴 문구, 아니면 None. 끝맺는 자리마다 이 하나를 쓴다."""
+    beats = len((p.get("outline") or {}).get("pages") or [])
+    if len(p["pages"]) >= beats:
+        return None
+    return f"출력이 중간에 끊겼습니다. {len(p['pages'])+1}페이지부터 구성되지 않았습니다."
+
+
+def salvage_storyboard(text: str, outline: Outline, opts: Options, requested: int) -> Storyboard | None:
+    """끊긴 응답에서 완결되고 검증까지 통과한 페이지만 모은다. 하나도 없으면 None."""
+    kept: list[Page] = []
+    for raw in salvage_pages(text)[:requested]:
+        try:
+            page = Page.model_validate(raw)
+            validate_planned_page(page, outline, opts)
+        except (ValueError, TypeError):
+            break     # 여기서 끊겼다. 뒤는 볼 것이 없다
+        kept.append(page)
+    return Storyboard(pages=kept) if kept else None
 
 
 async def service_generation(p: dict, pid: str, planning_done: asyncio.Event):
@@ -420,7 +446,8 @@ async def plan_work(pid: str, automatic: bool):
                 "story": p["story"], "outline": outline.model_dump(),
                 "first_page_number": done+1, "page_count": requested,
                 "previous_pages": [x["plan"] for x in p["pages"]], "options": creative_options(opts),
-            }, lambda x: storyboard_check(x, outline, opts, requested), settings=settings, max_tokens=PLAN_TOKENS)
+            }, lambda x: storyboard_check(x, outline, opts, requested), settings=settings, max_tokens=PLAN_TOKENS,
+               salvage=lambda text: salvage_storyboard(text, outline, opts, requested))
             for page in board.pages:
                 p["pages"].append({"plan": page.model_dump(), "images": [], "error": ""})
             progress(p, "storyboard", len(p["pages"]), len(outline.pages), None)
@@ -436,8 +463,15 @@ async def plan_work(pid: str, automatic: bool):
             p["status"], p["message"] = "generating", "기획을 마쳤습니다. 요청한 페이지를 생성하는 중"
             save(p)
             await servicer
-        p["status"] = "complete" if all(x["images"] for x in p["pages"]) else "ready"
-        p["message"] = "요청한 페이지를 모두 생성했습니다." if p["status"] == "complete" else "기획이 준비되었습니다."
+        # ★★출력이 중간에 끊겨 페이지가 모자라면 **그대로 멈추고 알린다** (사용자 지시 2026-09-21).
+        #   다시 묻지 않는다 — 다시 묻는 것은 처음부터 다시 출력시키는 일이라, 무엇을 버리고 무엇을
+        #   다시 뽑을지는 사용자가 보고 정하는 편이 낫다. 못 받은 페이지는 화면이 「출력 중단」으로
+        #   세우고, 지우거나 「콘티만」으로 이어 짤 수 있다.
+        if cut_short(p):
+            p["status"], p["message"] = "paused", cut_short(p)
+        else:
+            p["status"] = "complete" if all(x["images"] for x in p["pages"]) else "ready"
+            p["message"] = "요청한 페이지를 모두 생성했습니다." if p["status"] == "complete" else "기획이 준비되었습니다."
         save(p)
         if automatic:
             checkpoint(p)
@@ -581,8 +615,8 @@ async def generate_work(pid: str, indices: list[int]):
             progress(p, "generate", done+1, len(indices), index)
             checkpoint(p)
             save(p)
-        p["status"] = "complete"
-        p["message"] = "요청한 페이지를 모두 생성했습니다."
+        # ★콘티가 모자란 채로 끝나면 「다 했다」고 하지 않는다 — 못 받은 페이지가 남아 있다.
+        p["status"], p["message"] = ("paused", cut_short(p)) if cut_short(p) else ("complete", "요청한 페이지를 모두 생성했습니다.")
         save(p)
     except Exception as exc:
         p["status"], p["message"] = "error", str(exc)
@@ -1006,11 +1040,14 @@ async def delete_page(pid: str, index: int, body: DeletePage):
     await recover(p)
     if body.revision != p["revision"]:
         raise HTTPException(409, "프로젝트 상태가 바뀌었습니다. 다시 열어 주세요.")
-    if not p.get("outline") or index < 0 or index >= len(p["pages"]):
+    # ★콘티가 안 온 페이지도 지운다 (사용자 지시 2026-09-21). 출력이 끊기면 밑그림에는 있는데
+    #   콘티가 없는 자리가 남는데, 그것을 지우는 창구가 없으면 사용자가 손쓸 데가 없다.
+    if not p.get("outline") or index < 0 or index >= len(p["outline"]["pages"]):
         raise HTTPException(400, "지울 페이지가 없습니다.")
     if len(p["outline"]["pages"]) <= 1:
         raise HTTPException(400, "마지막 한 페이지는 지울 수 없습니다. 이야기를 고쳐 전체 다시 기획하세요.")
-    del p["pages"][index]
+    if index < len(p["pages"]):
+        del p["pages"][index]
     del p["outline"]["pages"][index]
     if len(p["pages"]) < len(p["outline"]["pages"]):
         p["status"] = "paused"

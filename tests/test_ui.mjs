@@ -399,5 +399,17 @@ try {
   assert.equal($('dialogue').value,'ko');
   assert.equal($('maxPanels').value,'0');
   assert.equal($('layoutMode').value,'free');
+  // 출력이 끊겨 콘티가 모자라면, 못 받은 페이지가 「출력 중단」으로 서고 거기서 지울 수 있다
+  input($('story'),'출력끊김 시험용 이야기.');
+  $('plan').click();await wait(()=>w.qa.get()?.status==='paused','cut storyboard');
+  const missing=[...w.document.querySelectorAll('.page-tab.is-missing')];
+  assert.equal(missing.length,1,'못 받은 페이지가 한 장 선다');
+  assert.ok(missing[0].textContent.includes('출력 중단'),missing[0].textContent);
+  assert.ok($('status').textContent.includes('출력이 중간에 끊겼습니다'),$('status').textContent);
+  const beats=w.qa.get().outline.pages.length;
+  missing[0].querySelector('[data-missing-remove]').click();
+  await wait(()=>w.qa.get().outline.pages.length===beats-1,'못 받은 페이지를 지운다');
+  assert.equal(w.document.querySelectorAll('.page-tab.is-missing').length,0);
+
   console.log('PASS: persistent style library, rename/apply/save/delete, no re-extraction, preserved resolution, CLI/model choice, free layouts, editing, generation/history, replan instructions, immediate stop/rollback, archived originals, reopen.');
 } finally {dom.window.close();}
