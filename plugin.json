@@ -5,7 +5,7 @@
     "en": "Manga Maker",
     "ja": "マンガ制作"
   },
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": {
     "ko": "간단한 스토리 입력으로 LLM이 자동으로 콘티 및 만화 생성.",
     "en": "Enter a simple story and an LLM generates the board and the manga.",
