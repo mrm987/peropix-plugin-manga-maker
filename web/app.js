@@ -309,8 +309,13 @@ function controls() {
   // While planning still runs, already storyboarded pages can be queued for generation.
   const planning = !!doc?.accepting && doc.status==='planning' && !requesting;
   const queued = doc?.gen_requests || [], generating = doc?.generation?.page;
-  $('generatePage').disabled = planning ? (!doc.pages[selected] || queued.includes(selected) || generating===selected) : (b || !doc?.pages.length || !done);
-  $('generateAll').disabled = planning ? !!doc.gen_follow : (b || !doc?.pages.length || !done || doc.pages.every(p => p.images.length));
+  /* ★★콘티가 끊겨 밑그림보다 페이지가 모자라도 **짜여 있는 페이지는 생성한다**
+     (사용자 지적 2026-09-21: *"중단된 콘티중에 완료된 콘티도 이미지 생성등이 막혀있음"*).
+     기획이 도는 동안에는 이미 짜인 페이지를 큐에 넣을 수 있는데(바로 위 `planning` 갈래),
+     그 기획이 끊기면 `done` 이 거짓으로 굳어 같은 페이지가 영영 안 열렸다. 못 받은 페이지는
+     화면이 「출력 중단」으로 따로 세우므로(`renderNav`) 여기서 또 막을 이유가 없다. */
+  $('generatePage').disabled = planning ? (!doc.pages[selected] || queued.includes(selected) || generating===selected) : (b || !doc?.pages[selected]);
+  $('generateAll').disabled = planning ? !!doc.gen_follow : (b || !doc?.pages.length || doc.pages.every(p => p.images.length));
   $('generateAll').textContent = planning ? T(doc.gen_follow ? '기획되는 대로 생성 중' : '기획되는 대로 생성') : T('남은 {n}페이지 생성',{n:doc?.pages.filter(p => !p.images.length).length || 0});
   // 40페이지가 차면 더 이어서 그릴 수 없다 (서버 상한과 같은 값).
   if (doc?.outline && doc.outline.pages.length >= 40) for (const id of ['plan','automatic']) $(id).disabled = true;

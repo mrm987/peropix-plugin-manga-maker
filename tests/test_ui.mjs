@@ -440,6 +440,10 @@ try {
   assert.equal(missing.length,1,'못 받은 페이지가 한 장 선다');
   assert.ok(missing[0].textContent.includes('출력 중단'),missing[0].textContent);
   assert.ok($('status').textContent.includes('출력이 중간에 끊겼습니다'),$('status').textContent);
+  // ★★짜인 페이지는 생성할 수 있다 (사용자 지적 2026-09-21). 밑그림보다 모자라다고 막으면,
+  //   못 받은 페이지를 지우기 전에는 완성된 페이지도 영영 못 그린다.
+  assert.equal($('generatePage').disabled,false,'끊긴 콘티에서도 짜인 페이지는 생성할 수 있다');
+  assert.equal($('generateAll').disabled,false,'남은 페이지 생성도 열려 있다');
   const beats=w.qa.get().outline.pages.length;
   missing[0].querySelector('[data-missing-remove]').click();
   await wait(()=>w.qa.get().outline.pages.length===beats-1,'못 받은 페이지를 지운다');
